@@ -6,14 +6,14 @@ mod desktop;
 use std::{env, io, net::SocketAddr, sync::Arc};
 
 use axum::{
+    Json,
     body::{Body, Bytes},
     extract::{OriginalUri, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    Json,
 };
 use futures_util::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use app::{Gateway, Trace};
 
@@ -45,11 +45,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = listener.local_addr()?;
     eprintln!("messages-gateway listening on {address}");
     let server = async move {
-        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
     };
     if headless {
         runtime.block_on(server)?;
@@ -68,10 +71,16 @@ async fn messages(
 ) -> Result<Response, ApiError> {
     let mut request: Value = serde_json::from_slice(&body)
         .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
-    let mut trace = Trace::new(&gateway, request["model"].as_str().unwrap_or("未知模型").to_owned());
+    let mut trace = Trace::new(
+        &gateway,
+        request["model"].as_str().unwrap_or("未知模型").to_owned(),
+    );
     let Some(mut url) = gateway.forwarding_url() else {
         trace.status = 503;
-        return Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, "网关转发已停止".into()));
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "网关转发已停止".into(),
+        ));
     };
     normalize_history(&mut request);
     strip_hop_headers(&mut headers);

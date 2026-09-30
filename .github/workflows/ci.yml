@@ -2,14 +2,39 @@ name: Messages gateway
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  RUST_BACKTRACE: 1
+
 jobs:
+  format:
+    name: Rust format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
   build-and-e2e:
+    name: Build and E2E (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -21,53 +46,54 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          components: clippy
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
       - name: Linux desktop prerequisites
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev xvfb x11-utils
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            . -> target
-            tests/grok-wire -> target
-      - name: Prepare edition 2024 sources and latest dependency locks
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Record build inputs
         run: |
-          mkdir -p artifacts/source
-          cargo update
-          cargo update --manifest-path tests/grok-wire/Cargo.toml
-          cargo fmt --all
-          cp src/*.rs artifacts/source/
-          cp Cargo.lock artifacts-cargo.lock
+          mkdir -p artifacts
           rustc --version --verbose > artifacts/toolchain.txt
           cargo tree --locked --depth 1 > artifacts/dependencies.txt
       - name: Lint and build gateway
         run: |
-          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --release --bin messages-gateway -- -D warnings
           cargo build --locked --release
-          cp Cargo.lock artifacts-cargo.lock
       - name: Fetch exact Grok production wire types
         run: python tests/fetch_grok_wire.py
       - name: Build Grok wire client
-        env:
-          RUSTFLAGS: -A dead_code
-        run: cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml
+        run: cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml --target-dir target
       - name: HTTP end-to-end regression
         run: |
           suffix=""
           if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
-          python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "tests/grok-wire/target/release/grok-wire-check${suffix}"
+          python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "target/release/grok-wire-check${suffix}"
       - name: Install GUI E2E driver
-        run: python -m pip install playwright==1.63.0
-      - name: Install Linux E2E browser
+        run: python -m pip install -r tests/requirements.txt
+      - name: Cache Linux E2E browser
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/requirements.txt') }}
+      - name: Prepare Linux E2E browser
         if: runner.os == 'Linux'
         run: python -m playwright install --with-deps chromium
       - name: Desktop GUI end-to-end
+        timeout-minutes: 5
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
@@ -86,10 +112,9 @@ jobs:
             artifacts/gui/*.log
             artifacts/gui/*.txt
             artifacts/gui/*.zip
-            artifacts/source/
             artifacts/toolchain.txt
             artifacts/dependencies.txt
-            artifacts-cargo.lock
+            Cargo.lock
             tests/grok-wire/Cargo.lock
           if-no-files-found: warn
       - name: Upload binary
@@ -100,3 +125,16 @@ jobs:
             target/release/messages-gateway
             target/release/messages-gateway.exe
           if-no-files-found: error
+
+  ci-status:
+    name: All checks passed
+    if: always()
+    needs: [format, build-and-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every job to pass
+        env:
+          FORMAT: ${{ needs.format.result }}
+          BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
+        run: test "$FORMAT" = success && test "$BUILD_AND_E2E" = success

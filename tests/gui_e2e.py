@@ -60,6 +60,9 @@ def run(binary, output):
     log = (output / "desktop.log").open("wb")
     process = None
     browser = None
+    context = None
+    page = None
+    tracing = False
 
     def launch(headless=False):
         return subprocess.Popen([str(binary), *(["--headless"] if headless else [])],
@@ -96,19 +99,26 @@ def run(binary, output):
                 if browser is None:
                     raise RuntimeError("actual desktop WebView2 did not expose CDP")
                 context = browser.contexts[0]
-                page = context.pages[0]
+                page = context.pages[0] if context.pages else context.wait_for_event("page")
                 page.wait_for_url(address + "/")
             else:
                 # Process above is an actual native GTK/WebKit window under Xvfb.
-                subprocess.run(["xwininfo", "-root", "-tree"], check=True,
-                               stdout=(output / "native-window-tree.txt").open("w"))
-                assert "Messages Gateway" in (output / "native-window-tree.txt").read_text()
+                for _ in range(100):
+                    window_tree = subprocess.run(["xwininfo", "-root", "-tree"], check=True,
+                                                 capture_output=True, text=True).stdout
+                    if "Messages Gateway" in window_tree:
+                        (output / "native-window-tree.txt").write_text(window_tree)
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError("native GTK window did not appear")
                 browser = playwright.chromium.launch()
                 context = browser.new_context(viewport={"width": 760, "height": 760},
                                               permissions=["clipboard-read", "clipboard-write"])
                 page = context.new_page()
                 page.goto(address)
             context.tracing.start(screenshots=True, snapshots=True, sources=True)
+            tracing = True
             expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
             expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
             expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
@@ -187,6 +197,7 @@ def run(binary, output):
             passed("theme-persistence-and-small-window")
 
             context.tracing.stop(path=str(output / "gui-trace.zip"))
+            tracing = False
             browser.close()
             browser = None
         if process.poll() is None:
@@ -202,8 +213,18 @@ def run(binary, output):
         report["status"] = "passed"
     except BaseException as error:
         report.update(status="failed", error=repr(error))
+        if page is not None:
+            try:
+                page.screenshot(path=str(output / "failure.png"))
+            except Exception:
+                pass
         raise
     finally:
+        if tracing:
+            try:
+                context.tracing.stop(path=str(output / "gui-trace.zip"))
+            except Exception:
+                pass
         if browser is not None:
             try:
                 browser.close()

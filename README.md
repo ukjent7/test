@@ -76,6 +76,10 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 
 ## GitHub Actions 验证
 
+参考 [Wry](https://github.com/tauri-apps/wry/blob/dev/.github/workflows/clippy-fmt.yml)、[Tauri](https://github.com/tauri-apps/tauri/blob/dev/.github/workflows/test-api-e2e.yml) 和 [uv](https://github.com/astral-sh/uv/blob/main/.github/workflows/ci.yml) 的编排。格式检查与 Windows/Linux 构建并行；Clippy 使用 release 配置，Grok 校验器复用同一个 target 目录，避免单独重建依赖。Rust、pip 和 Linux 浏览器均有缓存，E2E 失败也保留 Rust 缓存。同分支新提交取消旧任务，push 只检查 main，其他分支通过 PR 检查，避免一份变更触发两组 CI。
+
+CI 不修改源文件、不执行 cargo update，始终用已提交的锁文件构建；Dependabot 每周分组更新 Rust、Python 和 Actions 依赖，通过同一套 E2E 验证后合入。`All checks passed` 要求格式检查及两个平台的完整构建/E2E 均成功，单个平台中某一步通过不代表整组完成。
+
 本机不安装 Rust、不编译、不执行 E2E。CI 在 Linux 和 Windows 上编译、运行 Clippy，并启动真实网关与 HTTP 夹具上游进行 E2E。测试先验证日志原始事件被 Grok 实际生产 wire types 拒绝，再验证所有修补后的正常事件能被同一类型解析。wire types 从固定 Git revision 下载并检查 SHA-256，不改写为简化测试类型。
 
 场景详见 [tests/FAILURE_MODES.md](tests/FAILURE_MODES.md)。成功运行提供两类 Actions 产物：
@@ -88,9 +92,9 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 ```bash
 cargo build --locked --release
 python tests/fetch_grok_wire.py
-cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml
-python tests/e2e.py --gateway target/release/messages-gateway --checker tests/grok-wire/target/release/grok-wire-check
-python -m pip install playwright==1.63.0
+cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml --target-dir target
+python tests/e2e.py --gateway target/release/messages-gateway --checker target/release/grok-wire-check
+python -m pip install -r tests/requirements.txt
 # Windows：操作原生 WebView2
 python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
 # Linux：安装 Chromium 后在 Xvfb 中验证原生窗口与页面

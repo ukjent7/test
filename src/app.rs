@@ -99,7 +99,10 @@ impl Drop for Trace {
             result: self.result,
             repairs: self.repairs,
             duration_ms: self.started.elapsed().as_millis(),
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
         });
         control.calls.truncate(30);
     }
@@ -108,7 +111,10 @@ impl Drop for Trace {
 impl Gateway {
     pub fn forwarding_url(&self) -> Option<reqwest::Url> {
         let control = self.control.lock().unwrap();
-        control.settings.enabled.then(|| control.messages_url.clone())
+        control
+            .settings
+            .enabled
+            .then(|| control.messages_url.clone())
     }
 
     fn save(&self, settings: &Settings) -> Result<(), ApiError> {
@@ -116,39 +122,56 @@ impl Gateway {
             fs::create_dir_all(parent).map_err(settings_error)?;
         }
         let temporary = self.settings_path.with_extension("tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(settings).unwrap()).map_err(settings_error)?;
+        fs::write(&temporary, serde_json::to_vec_pretty(settings).unwrap())
+            .map_err(settings_error)?;
         fs::rename(temporary, &self.settings_path).map_err(settings_error)
     }
 }
 
 fn settings_error(error: io::Error) -> ApiError {
-    ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("无法保存设置：{error}"))
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("无法保存设置：{error}"),
+    )
 }
 
 fn messages_url(base: &str) -> Result<reqwest::Url, ApiError> {
-    let url = reqwest::Url::parse(&format!("{}/messages", base.trim_end_matches('/')))
-        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "请输入完整的 HTTP(S) 上游基地址".into()))?;
+    let url =
+        reqwest::Url::parse(&format!("{}/messages", base.trim_end_matches('/'))).map_err(|_| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                "请输入完整的 HTTP(S) 上游基地址".into(),
+            )
+        })?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "上游地址须使用 HTTP(S)，且不能包含查询参数或片段".into()));
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "上游地址须使用 HTTP(S)，且不能包含查询参数或片段".into(),
+        ));
     }
     Ok(url)
 }
 
 pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std::error::Error>> {
     let listen: SocketAddr = env::var("GATEWAY_LISTEN")
-        .unwrap_or_else(|_| "127.0.0.1:8789".into()).parse()?;
-    let settings_path = env::var_os("GATEWAY_CONFIG").map(PathBuf::from).unwrap_or_else(|| {
-        dirs::config_dir().unwrap_or_else(|| PathBuf::from("."))
-            .join("MessagesGateway/settings.json")
-    });
+        .unwrap_or_else(|_| "127.0.0.1:8789".into())
+        .parse()?;
+    let settings_path = env::var_os("GATEWAY_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::config_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("MessagesGateway/settings.json")
+        });
     let mut settings = match fs::read(&settings_path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {
-            upstream_base_url: "https://api.stepfun.ai/step_plan/v1".into(), enabled: true,
+            upstream_base_url: "https://api.stepfun.ai/step_plan/v1".into(),
+            enabled: true,
         },
         Err(error) => return Err(error.into()),
     };
@@ -162,8 +185,14 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     let gateway = Arc::new(Gateway {
         client: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(30)).build()?,
-        control: Mutex::new(Control { settings, messages_url, stats: Stats::default(), calls: VecDeque::new() }),
+            .connect_timeout(Duration::from_secs(30))
+            .build()?,
+        control: Mutex::new(Control {
+            settings,
+            messages_url,
+            stats: Stats::default(),
+            calls: VecDeque::new(),
+        }),
         settings_path,
         listen,
     });
@@ -176,20 +205,50 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         .route("/v1/messages", post(messages))
         .route("/messages", post(messages))
         .route("/health", get(|| async { "ok" }))
-        .route("/", get(|| async { Html(include_str!("../ui/index.html")) }))
-        .route("/app.css", get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], include_str!("../ui/app.css")) }))
-        .route("/app.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../ui/app.js")) }))
+        .route(
+            "/",
+            get(|| async { Html(include_str!("../ui/index.html")) }),
+        )
+        .route(
+            "/app.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("../ui/app.css"),
+                )
+            }),
+        )
+        .route(
+            "/app.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../ui/app.js"),
+                )
+            }),
+        )
         .merge(ui)
         .layer(DefaultBodyLimit::disable())
         .with_state(gateway);
     Ok((listener, app))
 }
 
-async fn local_control(ConnectInfo(peer): ConnectInfo<SocketAddr>, request: Request, next: Next) -> Response {
-    let host = request.headers().get(header::HOST).and_then(|value| value.to_str().ok()).unwrap_or("");
+async fn local_control(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
     let local_host = reqwest::Url::parse(&format!("http://{host}"))
-        .ok().is_some_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost")));
-    let same_origin = request.headers().get(header::ORIGIN)
+        .ok()
+        .is_some_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost")));
+    let same_origin = request
+        .headers()
+        .get(header::ORIGIN)
         .is_none_or(|origin| origin.as_bytes() == format!("http://{host}").as_bytes());
     if !peer.ip().is_loopback() || !local_host || !same_origin {
         return StatusCode::FORBIDDEN.into_response();
@@ -208,13 +267,25 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Json<serde_json::Value> 
 }
 
 #[derive(Deserialize)]
-struct UpstreamInput { upstream_base_url: String }
+struct UpstreamInput {
+    upstream_base_url: String,
+}
 
-async fn update_settings(State(gateway): State<Arc<Gateway>>, Json(input): Json<UpstreamInput>) -> Result<StatusCode, ApiError> {
-    let base = input.upstream_base_url.trim().trim_end_matches('/').to_owned();
+async fn update_settings(
+    State(gateway): State<Arc<Gateway>>,
+    Json(input): Json<UpstreamInput>,
+) -> Result<StatusCode, ApiError> {
+    let base = input
+        .upstream_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
     let url = messages_url(&base)?;
     let mut control = gateway.control.lock().unwrap();
-    let settings = Settings { upstream_base_url: base, enabled: control.settings.enabled };
+    let settings = Settings {
+        upstream_base_url: base,
+        enabled: control.settings.enabled,
+    };
     gateway.save(&settings)?;
     control.settings = settings;
     control.messages_url = url;
@@ -222,11 +293,19 @@ async fn update_settings(State(gateway): State<Arc<Gateway>>, Json(input): Json<
 }
 
 #[derive(Deserialize)]
-struct EnabledInput { enabled: bool }
+struct EnabledInput {
+    enabled: bool,
+}
 
-async fn set_enabled(State(gateway): State<Arc<Gateway>>, Json(input): Json<EnabledInput>) -> Result<StatusCode, ApiError> {
+async fn set_enabled(
+    State(gateway): State<Arc<Gateway>>,
+    Json(input): Json<EnabledInput>,
+) -> Result<StatusCode, ApiError> {
     let mut control = gateway.control.lock().unwrap();
-    let settings = Settings { upstream_base_url: control.settings.upstream_base_url.clone(), enabled: input.enabled };
+    let settings = Settings {
+        upstream_base_url: control.settings.upstream_base_url.clone(),
+        enabled: input.enabled,
+    };
     gateway.save(&settings)?;
     control.settings = settings;
     Ok(StatusCode::NO_CONTENT)
