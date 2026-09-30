@@ -74,7 +74,8 @@ impl Change {
         mut after: Option<Value>,
         reason: &'static str,
     ) -> Self {
-        if let (Some(Value::Object(before)), Some(Value::Object(after))) = (&mut before, &mut after) {
+        if let (Some(Value::Object(before)), Some(Value::Object(after))) = (&mut before, &mut after)
+        {
             let unchanged: Vec<String> = before
                 .iter()
                 .filter(|(key, value)| after.get(*key) == Some(*value))
@@ -328,9 +329,11 @@ async fn call_diff(
     Path(id): Path<u64>,
 ) -> Result<Json<Value>, ApiError> {
     let control = gateway.control.lock().unwrap();
-    let call = control.calls.iter().find(|call| call.id == id).ok_or_else(|| {
-        ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into())
-    })?;
+    let call = control
+        .calls
+        .iter()
+        .find(|call| call.id == id)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into()))?;
     Ok(Json(json!({"call": call, "diff": call.diff})))
 }
 

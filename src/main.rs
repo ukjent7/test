@@ -230,8 +230,7 @@ fn normalize_history(request: &mut Value) -> Vec<Change> {
             return true;
         };
         if blocks.iter().all(|block| {
-            unsigned_thinking(block)
-                && block["thinking"].as_str().unwrap_or("").trim().is_empty()
+            unsigned_thinking(block) && block["thinking"].as_str().unwrap_or("").trim().is_empty()
         }) {
             changes.push(Change::new(
                 path,
@@ -257,12 +256,7 @@ fn normalize_history(request: &mut Value) -> Vec<Change> {
             let before = block.clone();
             let text = block["thinking"].as_str().unwrap_or("").to_owned();
             if text.trim().is_empty() {
-                changes.push(Change::new(
-                    block_path,
-                    Some(before),
-                    None,
-                    "移除空思考块",
-                ));
+                changes.push(Change::new(block_path, Some(before), None, "移除空思考块"));
                 return false;
             }
             let object = block.as_object_mut().unwrap();
@@ -360,7 +354,10 @@ fn normalize_sse(frame: &[u8], frame_number: usize) -> (Vec<u8>, Vec<Change>) {
     if changes.is_empty() {
         return (frame.to_vec(), changes);
     }
-    let mut event = format!("SSE #{frame_number} · {}", value["type"].as_str().unwrap_or(""));
+    let mut event = format!(
+        "SSE #{frame_number} · {}",
+        value["type"].as_str().unwrap_or("")
+    );
     if let Some(index) = value["index"].as_u64() {
         event.push_str(&format!(" · index {index}"));
     }

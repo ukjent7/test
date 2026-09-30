@@ -99,8 +99,10 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .call .outcome.failed { color:var(--red); background:var(--red-soft); }
 .diff-button { padding:0; margin-top:7px; font-size:10px; text-align:left; }
 #diff-dialog { width:min(660px,calc(100% - 36px)); max-height:calc(100% - 36px); }
+#diff-dialog[open] { display:flex; flex-direction:column; }
+#diff-dialog>:not(#diff-content) { flex-shrink:0; }
 .diff-legend { display:flex; flex-wrap:wrap; gap:12px; color:var(--muted); font-size:10px; margin-bottom:18px; }
-#diff-content { font-size:11px; }
+#diff-content { font-size:11px; overflow-y:auto; min-height:0; }
 #diff-content section+section { margin-top:22px; }
 #diff-content h3 { font-size:12px; font-weight:600; margin:0 0 10px; }
 .diff-item { border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:10px; }

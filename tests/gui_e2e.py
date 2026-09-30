@@ -264,7 +264,7 @@ def run(binary, output):
                         "PRIVATE_RESPONSE_REASONING", "PRIVATE_RESPONSE_BODY", "cache_control"):
             assert private not in json.dumps(detail)
         open_diff(detail)
-        expect(page.get_by_test_id("diff-request")).to_contain_text(attack)
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
         expect(page.get_by_test_id("diff-request")).to_contain_text("/messages/2/content/1 → /messages/1/content/0")
         expect(page.get_by_test_id("diff-response")).to_contain_text("− signature: null")
         expect(page.get_by_test_id("diff-response")).to_contain_text('+ signature: ""')
@@ -272,9 +272,10 @@ def run(binary, output):
         assert page.locator("#diff-content img").count() == 0
         page.wait_for_timeout(1200)  # Status polling must preserve the inspected request.
         expect(page.get_by_role("dialog", name="请求 / 响应差异")).to_be_visible()
-        expect(page.get_by_test_id("diff-request")).to_contain_text(attack)
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
         page.get_by_role("button", name="复制差异", exact=True).click()
         assert json.loads(page.evaluate("navigator.clipboard.readText()")) == detail
+        page.get_by_test_id("diff-response").scroll_into_view_if_needed()
         page.screenshot(path=str(output / "diff-json-light.png"))
         page.keyboard.press("Escape")
         passed("diff-json-request-response-and-literal-content")
