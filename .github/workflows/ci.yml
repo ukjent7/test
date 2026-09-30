@@ -37,15 +37,15 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Lint and build gateway
         run: |
-          cargo clippy --all-targets -- -D warnings
-          cargo build --release
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --locked --release
           cp Cargo.lock artifacts-cargo.lock
       - name: Fetch exact Grok production wire types
         run: python tests/fetch_grok_wire.py
       - name: Build Grok wire client
         env:
           RUSTFLAGS: -A dead_code
-        run: cargo build --release --manifest-path tests/grok-wire/Cargo.toml
+        run: cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml
       - name: HTTP end-to-end regression
         run: |
           suffix=""

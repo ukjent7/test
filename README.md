@@ -64,9 +64,9 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 在有 Rust 的环境中重复 CI：
 
 ```bash
-cargo build --release
+cargo build --locked --release
 python tests/fetch_grok_wire.py
-cargo build --release --manifest-path tests/grok-wire/Cargo.toml
+cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml
 python tests/e2e.py --gateway target/release/messages-gateway --checker tests/grok-wire/target/release/grok-wire-check
 ```
 

@@ -87,7 +87,10 @@ def free_port():
 
 def run(binary, checker, output):
     output.mkdir(parents=True, exist_ok=True)
-    report = {"cases": [], "wire_checks": [], "status": "running"}
+    report = {"cases": [], "wire_checks": [], "status": "running",
+              "commit": os.environ.get("GITHUB_SHA"),
+              "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "grok_decoder_sha256": hashlib.sha256(checker.read_bytes()).hexdigest()}
     captures = {}
     release = threading.Event()
 
