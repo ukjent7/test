@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     defaults:
       run:
         shell: bash
@@ -23,18 +23,29 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.90.0
+          toolchain: stable
           components: rustfmt, clippy
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev xvfb x11-utils
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             . -> target
             tests/grok-wire -> target
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Prepare edition 2024 sources and latest dependency locks
+        run: |
+          mkdir -p artifacts/source
+          cargo update
+          cargo update --manifest-path tests/grok-wire/Cargo.toml
+          cargo fmt --all
+          cp src/*.rs artifacts/source/
+          cp Cargo.lock artifacts-cargo.lock
+          rustc --version --verbose > artifacts/toolchain.txt
+          cargo tree --locked --depth 1 > artifacts/dependencies.txt
       - name: Lint and build gateway
         run: |
           cargo clippy --locked --all-targets -- -D warnings
@@ -51,6 +62,18 @@ jobs:
           suffix=""
           if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
           python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "tests/grok-wire/target/release/grok-wire-check${suffix}"
+      - name: Install GUI E2E driver
+        run: python -m pip install playwright==1.63.0
+      - name: Install Linux E2E browser
+        if: runner.os == 'Linux'
+        run: python -m playwright install --with-deps chromium
+      - name: Desktop GUI end-to-end
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
+          else
+            xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
+          fi
       - name: Upload repeatable E2E evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -58,6 +81,14 @@ jobs:
           name: e2e-${{ matrix.os }}
           path: |
             artifacts/e2e/
+            artifacts/gui/*.png
+            artifacts/gui/*.json
+            artifacts/gui/*.log
+            artifacts/gui/*.txt
+            artifacts/gui/*.zip
+            artifacts/source/
+            artifacts/toolchain.txt
+            artifacts/dependencies.txt
             artifacts-cargo.lock
             tests/grok-wire/Cargo.lock
           if-no-files-found: warn

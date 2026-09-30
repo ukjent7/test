@@ -1,6 +1,28 @@
 # Messages 网关
 
-Rust 编写的本地 HTTP 网关，初版仅支持 `POST /v1/messages` 和 `POST /messages`。默认监听 `127.0.0.1:8789`，上游为 `https://api.stepfun.ai/step_plan/v1`。
+Rust 编写的 Messages 网关。第二版提供桌面 GUI，界面借鉴本地 `magpie-raw` 的灰白背景、圆角列表、紧凑控件和深浅主题。仍仅支持 `POST /v1/messages` 和 `POST /messages`。默认监听 `127.0.0.1:8789`，上游为 `https://api.stepfun.ai/step_plan/v1`。
+
+## 桌面界面
+
+双击 `messages-gateway.exe` 打开原生窗口并启动网关。系统 WebView 显示随程序内嵌的 HTML/CSS/JS，无须安装 Node 或前端资源。关闭窗口即退出程序和网关。
+
+- 查看实时运行状态，开启或停止新请求转发；停止不打断已经开始的请求。
+- 编辑上游地址，立即用于新请求，并保存供下次启动使用。
+- 复制 Grok Build 接入地址或配置片段。
+- 查看本次运行请求数、修补数量、错误及最近 30 条请求。
+- 切换并记住深浅主题。
+
+活动记录只存在于内存中，包含模型、HTTP 状态、耗时和修补数量，不保存密钥或消息正文。
+
+设置保存在系统用户配置目录的 `MessagesGateway/settings.json`，Windows 为 `%APPDATA%\MessagesGateway\settings.json`。`GATEWAY_CONFIG` 可指定文件；`GATEWAY_UPSTREAM_BASE_URL` 在每次启动时覆盖文件中的上游地址。设置写入成功后才更新界面和实际转发地址。GUI 管理接口只接受本机与同源请求。
+
+Windows 使用系统 WebView2。Linux 原生窗口使用 GTK3 与 WebKitGTK 4.1，需安装 `libgtk-3-0` 和 `libwebkit2gtk-4.1-0`。命令行模式用 `messages-gateway --headless`，此时也可访问本地地址打开同一管理页面。
+
+## Rust 与依赖
+
+项目使用 edition 2024、对应的格式化规则和默认 resolver 3。`rust-toolchain.toml` 选择最新 `stable`，当前核查为 [Rust 1.98.1](https://github.com/rust-lang/rust/releases/tag/1.98.1)。直接依赖已更新为当前最新稳定版本，锁文件固定 CI 已验证的完整依赖图。
+
+迁移参考本地 `edition-guide/src/rust-2024/`，采用 let-else、2024 格式化及普通引用模式，不在多线程运行期间修改进程环境变量。reqwest 0.13 使用新的 `rustls` 功能名。GUI 设置直接更新共享状态。
 
 ## 故障与修复
 
@@ -59,7 +81,7 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 场景详见 [tests/FAILURE_MODES.md](tests/FAILURE_MODES.md)。成功运行提供两类 Actions 产物：
 
 - `messages-gateway-*`：对应操作系统的可执行文件。
-- `e2e-*`：上下游请求、原始响应、实际 Grok 解析结果、流首事件记录、汇总 `report.json`、源代码版本、依赖锁文件和 `sha256.json`。失败时也保存已有证据。
+- `e2e-*`：协议请求/响应、Grok 解析结果，以及 GUI 的浅色/深色/窄窗口截图、交互 trace、状态快照、汇总 `report.json`、工具链版本、依赖锁文件和 `sha256.json`。Windows GUI 测试操作真正的桌面 WebView2；Linux 测试同时验证原生窗口启动与相同页面的控件。失败时也保存已有证据。
 
 在有 Rust 的环境中重复 CI：
 
@@ -68,6 +90,12 @@ cargo build --locked --release
 python tests/fetch_grok_wire.py
 cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml
 python tests/e2e.py --gateway target/release/messages-gateway --checker tests/grok-wire/target/release/grok-wire-check
+python -m pip install playwright==1.63.0
+# Windows：操作原生 WebView2
+python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
+# Linux：安装 Chromium 后在 Xvfb 中验证原生窗口与页面
+python -m playwright install --with-deps chromium
+xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
 ```
 
 Windows 可执行文件名追加 `.exe`。此 E2E 使用日志夹具和本地 HTTP 上游，不需要真实 API key；真实 StepFun 会话仍需使用你的模型 key 验证。

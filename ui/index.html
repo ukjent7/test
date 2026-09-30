@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Messages Gateway</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true">m</span><h1>Messages Gateway</h1></div>
+    <nav class="segments" role="tablist" aria-label="页面">
+      <button role="tab" id="tab-gateway" aria-controls="gateway" aria-selected="true">网关</button>
+      <button role="tab" id="tab-activity" aria-controls="activity" aria-selected="false">活动</button>
+    </nav>
+    <button class="icon theme" id="theme" aria-label="切换主题" title="切换主题">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.2A7 7 0 0 1 7.8 3.8a7 7 0 1 0 8.4 8.4Z"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <section id="gateway" role="tabpanel" aria-labelledby="tab-gateway">
+      <div class="section-head"><h2>服务</h2><span class="subtle">本地运行 · Messages</span></div>
+      <div class="list">
+        <div class="row status-row">
+          <span class="service-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/></svg></span>
+          <div class="grow"><strong>网关转发</strong><div class="secondary">连接 Grok Build 与模型服务</div></div>
+          <span class="state" data-testid="gateway-state" id="state">连接中</span>
+          <button class="switch" role="switch" aria-label="网关转发" aria-checked="false" id="enabled" disabled><span></span></button>
+        </div>
+        <div class="row"><span class="row-label">本地地址</span><code class="value" id="local-address">—</code><span class="tag">HTTP</span></div>
+        <div class="row"><span class="row-label">上游服务</span><code class="value" data-testid="upstream" id="upstream">—</code><button class="pill" id="edit-upstream" aria-label="编辑上游">编辑</button></div>
+      </div>
+
+      <div class="metrics" aria-label="本次运行统计">
+        <div><span>请求</span><strong data-testid="request-count" id="requests">0</strong></div>
+        <div><span>进行中</span><strong id="active">0</strong></div>
+        <div><span>兼容修补</span><strong data-testid="repair-count" id="repairs">0</strong></div>
+        <div><span>失败</span><strong id="errors">0</strong></div>
+      </div>
+
+      <div class="section-head"><h2>接入</h2><span class="subtle">使用原有模型和密钥</span></div>
+      <div class="list">
+        <div class="row connect-row">
+          <span class="agent-icon" aria-hidden="true">G</span>
+          <div class="grow"><strong>Grok Build</strong><div class="secondary">将模型的 base_url 指向此地址</div></div>
+          <span class="tag accent">Messages</span>
+        </div>
+        <div class="endpoint-row"><code data-testid="endpoint" id="endpoint">—</code><button class="pill" id="copy-endpoint" aria-label="复制地址">复制地址</button></div>
+        <details>
+          <summary>查看配置</summary>
+          <div class="config"><pre id="config-example"></pre><button class="text-button" id="copy-config">复制配置</button></div>
+          <p class="config-note">在现有模型配置中替换这两个字段，然后重启 Grok Build。</p>
+        </details>
+      </div>
+
+      <div class="section-head"><h2>兼容处理</h2></div>
+      <div class="list compatibility"><span class="check" aria-hidden="true">✓</span><div><strong>思考内容兼容</strong><p>自动补齐缺失字段，保留已有签名、工具调用与流式输出。</p></div><span class="tag success">已启用</span></div>
+    </section>
+
+    <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
+      <div class="section-head"><h2>近期请求</h2><span class="subtle">最近 30 条 · 本次运行</span></div>
+      <div class="list activity-list" data-testid="activity-list" id="activity-list">
+        <div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从 Grok Build 发送一条消息，它会出现在这里。</p></div>
+      </div>
+      <p class="privacy-note">仅记录模型、状态、耗时和修补数量。</p>
+    </section>
+  </main>
+
+  <footer><span class="footer-dot" id="footer-dot"></span><span id="connection">正在连接网关</span><span class="grow"></span><span id="version">v0.2.0</span></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="dialog-heading"><h2 id="settings-title">上游服务</h2><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
+      <p class="dialog-description">设置提供 Messages 服务的上游地址。</p>
+      <label for="upstream-input">上游基地址</label>
+      <input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1">
+      <p class="hint">填写基地址，保存后立即用于新请求。</p>
+      <p class="field-error" data-testid="settings-error" id="settings-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="pill" id="cancel-settings">取消</button><button type="submit" class="primary" id="save-settings">保存</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -1,20 +1,21 @@
-use std::{env, io, net::SocketAddr, sync::Arc, time::Duration};
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+mod app;
+mod desktop;
+
+use std::{env, io, net::SocketAddr, sync::Arc};
 
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, OriginalUri, State},
+    extract::{OriginalUri, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
-    Json, Router,
+    Json,
 };
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
-struct Gateway {
-    client: reqwest::Client,
-    messages_url: reqwest::Url,
-}
+use app::{Gateway, Trace};
 
 struct ApiError(StatusCode, String);
 
@@ -33,45 +34,29 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listen: SocketAddr = env::var("GATEWAY_LISTEN")
-        .unwrap_or_else(|_| "127.0.0.1:8789".into())
-        .parse()?;
-    let upstream = env::var("GATEWAY_UPSTREAM_BASE_URL")
-        .unwrap_or_else(|_| "https://api.stepfun.ai/step_plan/v1".into());
-    let messages_url =
-        reqwest::Url::parse(&format!("{}/messages", upstream.trim_end_matches('/')))?;
-    if !matches!(messages_url.scheme(), "http" | "https")
-        || messages_url.host_str().is_none()
-        || messages_url.query().is_some()
-        || messages_url.fragment().is_some()
-    {
-        return Err(
-            "GATEWAY_UPSTREAM_BASE_URL must be an HTTP(S) base URL without query or fragment"
-                .into(),
-        );
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let headless = env::args().any(|argument| argument == "--headless");
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (listener, router) = match runtime.block_on(app::prepare()) {
+        Ok(server) => server,
+        Err(error) if !headless => return desktop::run(Err(error.to_string())),
+        Err(error) => return Err(error),
+    };
+    let address = listener.local_addr()?;
+    eprintln!("messages-gateway listening on {address}");
+    let server = async move {
+        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+            .with_graceful_shutdown(async {
+                let _ = tokio::signal::ctrl_c().await;
+            })
+            .await
+    };
+    if headless {
+        runtime.block_on(server)?;
+    } else {
+        runtime.spawn(server);
+        desktop::run(Ok(format!("http://{address}/")))?;
     }
-    let gateway = Arc::new(Gateway {
-        client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(30))
-            .build()?,
-        messages_url,
-    });
-    let app = Router::new()
-        .route("/v1/messages", post(messages))
-        .route("/messages", post(messages))
-        .route("/health", get(|| async { "ok" }))
-        .layer(DefaultBodyLimit::disable())
-        .with_state(gateway);
-    let listener = tokio::net::TcpListener::bind(listen).await?;
-    eprintln!("messages-gateway listening on {}", listener.local_addr()?);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
     Ok(())
 }
 
@@ -83,12 +68,16 @@ async fn messages(
 ) -> Result<Response, ApiError> {
     let mut request: Value = serde_json::from_slice(&body)
         .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
+    let mut trace = Trace::new(&gateway, request["model"].as_str().unwrap_or("未知模型").to_owned());
+    let Some(mut url) = gateway.forwarding_url() else {
+        trace.status = 503;
+        return Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, "网关转发已停止".into()));
+    };
     normalize_history(&mut request);
     strip_hop_headers(&mut headers);
     headers.remove(header::HOST);
     headers.remove(header::CONTENT_LENGTH);
     headers.insert(header::ACCEPT_ENCODING, "identity".parse().unwrap());
-    let mut url = gateway.messages_url.clone();
     url.set_query(uri.query());
     let upstream = gateway
         .client
@@ -99,6 +88,7 @@ async fn messages(
         .await
         .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
     let status = upstream.status();
+    trace.status = status.as_u16();
     let mut headers = upstream.headers().clone();
     strip_hop_headers(&mut headers);
     if !status.is_success() {
@@ -113,8 +103,10 @@ async fn messages(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.split(';').next().unwrap_or("").trim() == "text/event-stream");
     let body = if is_sse {
+        trace.result = "取消";
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
         let stream = async_stream::stream! {
+            let mut trace = trace;
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
             let mut line_length = 0;
@@ -122,6 +114,7 @@ async fn messages(
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(error) => {
+                        trace.result = "失败";
                         yield Err::<Bytes, io::Error>(io::Error::other(error));
                         return;
                     }
@@ -137,14 +130,19 @@ async fn messages(
                         line_length += 1;
                     }
                     if blank {
-                        yield Ok(Bytes::from(normalize_sse(&frame)));
+                        let (output, repairs) = normalize_sse(&frame);
+                        trace.repairs += repairs;
+                        yield Ok(Bytes::from(output));
                         frame.clear();
                     }
                 }
             }
             if !frame.is_empty() {
-                yield Ok(Bytes::from(normalize_sse(&frame)));
+                let (output, repairs) = normalize_sse(&frame);
+                trace.repairs += repairs;
+                yield Ok(Bytes::from(output));
             }
+            trace.result = "完成";
         };
         Body::from_stream(stream)
     } else {
@@ -154,8 +152,9 @@ async fn messages(
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
         let mut value: Value = serde_json::from_slice(&bytes)
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.to_string()))?;
-        let changed = normalize_response(&mut value);
-        if changed {
+        trace.repairs = normalize_response(&mut value);
+        trace.result = "完成";
+        if trace.repairs > 0 {
             Body::from(serde_json::to_vec(&value).unwrap())
         } else {
             Body::from(bytes)
@@ -226,8 +225,8 @@ fn normalize_history(request: &mut Value) {
     });
 }
 
-fn normalize_response(value: &mut Value) -> bool {
-    let mut changed = false;
+fn normalize_response(value: &mut Value) -> usize {
+    let mut repairs = 0;
     let blocks: &mut [Value] = match value["type"].as_str() {
         Some("content_block_start") => value
             .get_mut("content_block")
@@ -241,25 +240,27 @@ fn normalize_response(value: &mut Value) -> bool {
             .as_array_mut()
             .map(Vec::as_mut_slice)
             .unwrap_or(&mut []),
-        _ => return false,
+        _ => return 0,
     };
     for block in blocks {
         if block["type"] != "thinking" {
             continue;
         }
+        let mut changed = false;
         for field in ["thinking", "signature"] {
             if block.get(field).is_none_or(Value::is_null) {
                 block[field] = json!("");
                 changed = true;
             }
         }
+        repairs += usize::from(changed);
     }
-    changed
+    repairs
 }
 
-fn normalize_sse(frame: &[u8]) -> Vec<u8> {
+fn normalize_sse(frame: &[u8]) -> (Vec<u8>, usize) {
     let Ok(text) = std::str::from_utf8(frame) else {
-        return frame.to_vec();
+        return (frame.to_vec(), 0);
     };
     let data = text
         .lines()
@@ -270,10 +271,11 @@ fn normalize_sse(frame: &[u8]) -> Vec<u8> {
         .collect::<Vec<_>>()
         .join("\n");
     let Ok(mut value) = serde_json::from_str::<Value>(&data) else {
-        return frame.to_vec();
+        return (frame.to_vec(), 0);
     };
-    if !normalize_response(&mut value) {
-        return frame.to_vec();
+    let repairs = normalize_response(&mut value);
+    if repairs == 0 {
+        return (frame.to_vec(), 0);
     }
     let mut output = String::new();
     let mut replaced = false;
@@ -293,5 +295,5 @@ fn normalize_sse(frame: &[u8]) -> Vec<u8> {
             output.push_str(line);
         }
     }
-    output.into_bytes()
+    (output.into_bytes(), repairs)
 }

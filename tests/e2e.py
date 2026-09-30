@@ -173,10 +173,11 @@ def run(binary, checker, output):
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     port = free_port()
-    env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
+    env = {**os.environ, "GATEWAY_CONFIG": str(output.resolve() / "settings.json"),
+           "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/step_plan/v1/"}
     log = (output / "gateway.log").open("wb")
-    process = subprocess.Popen([str(binary)], env=env, stdout=log, stderr=log)
+    process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
 
     def check_wire(data, kind="event", expected="ok"):
         envelope = json.dumps({"kind": kind, "data": data}) + "\n"
