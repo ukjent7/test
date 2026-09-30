@@ -58,7 +58,7 @@ jobs:
           cache-dependency-path: tests/requirements.txt
       - name: Linux desktop prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev xvfb x11-utils
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev xvfb x11-utils dbus-x11 fonts-noto-cjk
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -98,7 +98,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
           else
-            xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
+            dbus-run-session -- xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
           fi
       - name: Upload repeatable E2E evidence
         if: always()

@@ -99,7 +99,7 @@ python -m pip install -r tests/requirements.txt
 python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
 # Linux：安装 Chromium 后在 Xvfb 中验证原生窗口与页面
 python -m playwright install --with-deps chromium
-xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
+dbus-run-session -- xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
 ```
 
 Windows 可执行文件名追加 `.exe`。此 E2E 使用日志夹具和本地 HTTP 上游，不需要真实 API key；真实 StepFun 会话仍需使用你的模型 key 验证。

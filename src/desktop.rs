@@ -8,15 +8,18 @@ use wry::{WebContext, WebViewBuilder};
 
 pub fn run(page: Result<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
+    eprintln!("desktop event loop initialized");
     let window = WindowBuilder::new()
         .with_title("Messages Gateway")
         .with_inner_size(LogicalSize::new(760.0, 760.0))
         .with_min_inner_size(LogicalSize::new(460.0, 540.0))
         .build(&event_loop)?;
+    eprintln!("desktop window created");
     let data_directory = std::env::var_os("WEBVIEW2_USER_DATA_FOLDER")
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::data_local_dir().map(|path| path.join("MessagesGateway/webview")));
     let mut context = WebContext::new(data_directory);
+    eprintln!("desktop browser context created");
     let builder = match page {
         Ok(url) => {
             let origin = reqwest::Url::parse(&url)?.origin();
@@ -32,7 +35,9 @@ pub fn run(page: Result<String, String>) -> Result<(), Box<dyn std::error::Error
     let builder = {
         use wry::WebViewBuilderExtWindows;
         match std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
-            Ok(arguments) => builder.with_additional_browser_args(arguments).with_devtools(true),
+            Ok(arguments) => builder
+                .with_additional_browser_args(arguments)
+                .with_devtools(true),
             Err(_) => builder,
         }
     };
@@ -44,6 +49,7 @@ pub fn run(page: Result<String, String>) -> Result<(), Box<dyn std::error::Error
         use wry::WebViewBuilderExtUnix;
         builder.build_gtk(window.default_vbox().ok_or("window has no GTK container")?)?
     };
+    eprintln!("desktop webview created");
     event_loop.run(move |event, _, control_flow| {
         let _ = (&window, &webview, &context); // Keep the native handles and context alive.
         *control_flow = ControlFlow::Wait;

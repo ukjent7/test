@@ -62,6 +62,7 @@ def run(binary, output):
     browser = None
     context = None
     page = None
+    playwright = None
     tracing = False
 
     def launch(headless=False):
@@ -86,120 +87,113 @@ def run(binary, output):
     try:
         process = launch()
         wait_ready()
-        with sync_playwright() as playwright:
-            if os.name == "nt":
-                for _ in range(300):
-                    try:
-                        browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}", timeout=1000)
-                        break
-                    except Exception:
-                        if process.poll() is not None:
-                            raise RuntimeError("native window exited before CDP became available")
-                        time.sleep(0.1)
-                if browser is None:
-                    raise RuntimeError("actual desktop WebView2 did not expose CDP")
-                context = browser.contexts[0]
-                page = context.pages[0] if context.pages else context.wait_for_event("page")
-                page.wait_for_url(address + "/")
-            else:
-                # Process above is an actual native GTK/WebKit window under Xvfb.
-                for _ in range(100):
-                    window_tree = subprocess.run(["xwininfo", "-root", "-tree"], check=True,
-                                                 capture_output=True, text=True).stdout
-                    if "Messages Gateway" in window_tree:
-                        (output / "native-window-tree.txt").write_text(window_tree)
-                        break
+        playwright = sync_playwright().start()
+        if os.name == "nt":
+            for _ in range(300):
+                try:
+                    browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}", timeout=1000)
+                    break
+                except Exception:
+                    if process.poll() is not None:
+                        raise RuntimeError("native window exited before CDP became available")
                     time.sleep(0.1)
-                else:
-                    raise RuntimeError("native GTK window did not appear")
-                browser = playwright.chromium.launch()
-                context = browser.new_context(viewport={"width": 760, "height": 760},
-                                              permissions=["clipboard-read", "clipboard-write"])
-                page = context.new_page()
-                page.goto(address)
-            context.tracing.start(screenshots=True, snapshots=True, sources=True)
-            tracing = True
-            expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
-            expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
-            expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
-            passed("native-window-and-live-state")
-
-            page.get_by_role("button", name="复制地址", exact=True).click()
-            expect(page.get_by_role("status")).to_contain_text("已复制")
-            # WebView2 clipboard permissions are controlled by the host renderer.
-            assert page.evaluate("navigator.clipboard.readText()") == address + "/v1"
-            passed("copy-endpoint")
-
-            page.get_by_role("button", name="编辑上游", exact=True).click()
-            page.get_by_label("上游基地址", exact=True).fill("file:///invalid")
-            page.get_by_role("button", name="保存", exact=True).click()
-            expect(page.get_by_test_id("settings-error")).to_be_visible()
-            assert not settings_path.exists()
-            passed("invalid-settings-do-not-overwrite")
-            page.keyboard.press("Escape")
-            expect(page.get_by_role("dialog")).not_to_be_visible()
-            passed("keyboard-dismiss")
-
-            upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
-            page.get_by_role("button", name="编辑上游", exact=True).click()
-            page.get_by_label("上游基地址", exact=True).fill(upstream_url)
-            page.get_by_role("button", name="保存", exact=True).click()
-            expect(page.get_by_role("dialog")).not_to_be_visible()
-            expect(page.get_by_test_id("upstream")).to_have_text(upstream_url)
-            assert json.loads(settings_path.read_text())["upstream_base_url"] == upstream_url
-            passed("save-upstream")
-
-            request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
-                            "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
-            response = context.request.post(address + "/v1/messages", data=request_body,
-                                             headers={"Authorization": "Bearer PRIVATE_API_KEY"})
-            assert response.status == 200
-            assert response.json()["content"][0]["signature"] == ""
-            assert upstream_calls[-1]["path"] == "/step_plan/v1/messages"
-            expect(page.get_by_test_id("request-count")).to_have_text("1")
-            expect(page.get_by_test_id("repair-count")).to_have_text("1")
-            page.get_by_role("tab", name="活动", exact=True).click()
-            expect(page.get_by_test_id("activity-list")).to_contain_text("step-5-preview")
-            status = context.request.get(address + "/ui/status").json()
-            assert "PRIVATE_USER_MESSAGE" not in json.dumps(status)
-            assert "PRIVATE_API_KEY" not in json.dumps(status)
-            (output / "request-status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-            page.screenshot(path=str(output / "activity-light.png"))
-            passed("real-request-repair-and-private-activity")
-
-            page.get_by_role("tab", name="网关", exact=True).click()
-            page.get_by_role("switch", name="网关转发", exact=True).click()
-            expect(page.get_by_test_id("gateway-state")).to_have_text("已停止")
-            calls_before = len(upstream_calls)
-            assert context.request.post(address + "/v1/messages", data=request_body).status == 503
-            assert len(upstream_calls) == calls_before
-            page.get_by_role("switch", name="网关转发", exact=True).click()
-            expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
-            assert context.request.post(address + "/v1/messages", data=request_body).status == 200
-            passed("stop-and-start-forwarding")
-
-            rejected = context.request.post(address + "/ui/settings", data={"upstream_base_url": "https://evil.example"},
-                                            headers={"Origin": "https://evil.example"})
-            assert rejected.status == 403
-            assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == upstream_url
-            passed("cross-origin-control-rejected")
-
-            page.get_by_role("button", name="切换主题", exact=True).click()
-            expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-            page.screenshot(path=str(output / "gateway-dark.png"))
-            page.reload()
-            expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-            page.get_by_role("button", name="切换主题", exact=True).click()
-            page.screenshot(path=str(output / "gateway-light.png"))
-            page.set_viewport_size({"width": 460, "height": 740})
-            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            page.screenshot(path=str(output / "gateway-narrow.png"))
-            passed("theme-persistence-and-small-window")
-
-            context.tracing.stop(path=str(output / "gui-trace.zip"))
-            tracing = False
-            browser.close()
-            browser = None
+            if browser is None:
+                raise RuntimeError("actual desktop WebView2 did not expose CDP")
+            context = browser.contexts[0]
+            page = context.pages[0] if context.pages else context.wait_for_event("page")
+            page.wait_for_url(address + "/")
+        else:
+            # Process above is an actual native GTK/WebKit window under Xvfb.
+            for _ in range(100):
+                window_tree = subprocess.run(["xwininfo", "-root", "-tree"], check=True,
+                                             capture_output=True, text=True).stdout
+                if "Messages Gateway" in window_tree:
+                    (output / "native-window-tree.txt").write_text(window_tree)
+                    break
+                time.sleep(0.1)
+            else:
+                (output / "native-window-tree.txt").write_text(window_tree)
+                raise RuntimeError("native GTK window did not appear")
+            browser = playwright.chromium.launch()
+            context = browser.new_context(viewport={"width": 760, "height": 760},
+                                          permissions=["clipboard-read", "clipboard-write"])
+            page = context.new_page()
+            page.goto(address)
+        context.tracing.start(screenshots=True, snapshots=True, sources=True)
+        tracing = True
+        expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
+        expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
+        expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
+        passed("native-window-and-live-state")
+        page.get_by_role("button", name="复制地址", exact=True).click()
+        expect(page.get_by_role("status")).to_contain_text("已复制")
+        # WebView2 clipboard permissions are controlled by the host renderer.
+        assert page.evaluate("navigator.clipboard.readText()") == address + "/v1"
+        passed("copy-endpoint")
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        page.get_by_label("上游基地址", exact=True).fill("file:///invalid")
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_test_id("settings-error")).to_be_visible()
+        assert not settings_path.exists()
+        passed("invalid-settings-do-not-overwrite")
+        page.keyboard.press("Escape")
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        passed("keyboard-dismiss")
+        upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        page.get_by_label("上游基地址", exact=True).fill(upstream_url)
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        expect(page.get_by_test_id("upstream")).to_have_text(upstream_url)
+        assert json.loads(settings_path.read_text())["upstream_base_url"] == upstream_url
+        passed("save-upstream")
+        request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
+                        "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
+        response = context.request.post(address + "/v1/messages", data=request_body,
+                                         headers={"Authorization": "Bearer PRIVATE_API_KEY"})
+        assert response.status == 200
+        assert response.json()["content"][0]["signature"] == ""
+        assert upstream_calls[-1]["path"] == "/step_plan/v1/messages"
+        expect(page.get_by_test_id("request-count")).to_have_text("1")
+        expect(page.get_by_test_id("repair-count")).to_have_text("1")
+        page.get_by_role("tab", name="活动", exact=True).click()
+        expect(page.get_by_test_id("activity-list")).to_contain_text("step-5-preview")
+        status = context.request.get(address + "/ui/status").json()
+        assert "PRIVATE_USER_MESSAGE" not in json.dumps(status)
+        assert "PRIVATE_API_KEY" not in json.dumps(status)
+        (output / "request-status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        page.screenshot(path=str(output / "activity-light.png"))
+        passed("real-request-repair-and-private-activity")
+        page.get_by_role("tab", name="网关", exact=True).click()
+        page.get_by_role("switch", name="网关转发", exact=True).click()
+        expect(page.get_by_test_id("gateway-state")).to_have_text("已停止")
+        calls_before = len(upstream_calls)
+        assert context.request.post(address + "/v1/messages", data=request_body).status == 503
+        assert len(upstream_calls) == calls_before
+        page.get_by_role("switch", name="网关转发", exact=True).click()
+        expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
+        assert context.request.post(address + "/v1/messages", data=request_body).status == 200
+        passed("stop-and-start-forwarding")
+        rejected = context.request.post(address + "/ui/settings", data={"upstream_base_url": "https://evil.example"},
+                                        headers={"Origin": "https://evil.example"})
+        assert rejected.status == 403
+        assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == upstream_url
+        passed("cross-origin-control-rejected")
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+        page.screenshot(path=str(output / "gateway-dark.png"))
+        page.reload()
+        expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        page.screenshot(path=str(output / "gateway-light.png"))
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(output / "gateway-narrow.png"))
+        passed("theme-persistence-and-small-window")
+        context.tracing.stop(path=str(output / "gui-trace.zip"))
+        tracing = False
+        browser.close()
+        browser = None
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=10)
@@ -230,6 +224,8 @@ def run(binary, output):
                 browser.close()
             except Exception:
                 pass
+        if playwright is not None:
+            playwright.stop()
         if process is not None and process.poll() is None:
             process.terminate()
             try:
