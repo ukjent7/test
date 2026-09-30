@@ -179,6 +179,8 @@ def run(binary, output):
         assert rejected.status == 403
         assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == upstream_url
         passed("cross-origin-control-rejected")
+        expect(page.get_by_test_id("request-count")).to_have_text("3")
+        expect(page.get_by_role("status")).not_to_be_visible()
         page.get_by_role("button", name="切换主题", exact=True).click()
         expect(page.locator("html")).to_have_attribute("data-theme", "dark")
         page.screenshot(path=str(output / "gateway-dark.png"))

@@ -85,7 +85,7 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .compatibility strong { font-size:11px; }
 .compatibility p { color:var(--muted); font-size:10.5px; margin-top:3px; }
 .check { width:24px; height:24px; display:grid; place-items:center; background:var(--green-soft); color:var(--green); border-radius:50%; flex:none; }
-#gateway>.section-head:nth-last-of-type(1) { margin-top:23px; }
+.list+.section-head { margin-top:23px; }
 .empty { text-align:center; padding:70px 24px; }
 .empty-icon { display:block; font-size:26px; color:var(--muted); margin-bottom:12px; }
 .empty strong { display:block; font-size:12px; }
