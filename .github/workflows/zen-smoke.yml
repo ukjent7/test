@@ -1,6 +1,9 @@
 name: Zen free model smoke
 
 on:
+  push:
+    branches: [feat/zen-upstream]
+    paths: [.github/workflows/zen-smoke.yml]
   workflow_dispatch:
 
 permissions:
