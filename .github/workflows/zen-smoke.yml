@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update && sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libxdo3
-          gh run download 36790348124 --name messages-gateway-ubuntu-latest --dir artifacts/bin
+          gh run download 36792403344 --name messages-gateway-ubuntu-latest --dir artifacts/bin
           chmod +x artifacts/bin/messages-gateway
           mkdir -p artifacts/zen-smoke
           GATEWAY_CONFIG="$PWD/artifacts/zen-smoke/settings.json" GATEWAY_OPENCODE_API_KEY=public artifacts/bin/messages-gateway --headless > artifacts/zen-smoke/gateway.log 2>&1 &
@@ -39,10 +39,8 @@ jobs:
               except OSError:
                   time.sleep(.1)
           results = []
-          for shape in ('agent_none',):
-              body = {'model': 'opencode/mimo-v2.5-free', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 32, 'stream': True, 'tool_choice': 'none'}
-              if shape == 'agent_none':
-                  body['tools'] = [{'type': 'function', 'function': {'name': name, 'description': name, 'parameters': {'type': 'object', 'properties': {}}}} for name in ('bash', 'edit', 'glob', 'grep', 'read')]
+          for shape in ('plain_client',):
+              body = {'model': 'opencode/mimo-v2.5-free', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 64, 'stream': False}
               (output / f'{shape}.request.json').write_text(json.dumps(body, indent=2))
               request = urllib.request.Request('http://127.0.0.1:8789/v1/chat/completions', json.dumps(body).encode(), {'Content-Type': 'application/json'})
               try:
@@ -50,6 +48,9 @@ jobs:
               except urllib.error.HTTPError as error:
                   response = error
               wire = response.read()
+              assert response.status == 200, wire
+              value = json.loads(wire)
+              assert value['object'] == 'chat.completion' and value['choices'][0]['message']['content'] == 'OK', value
               (output / f'{shape}.response.bin').write_bytes(wire)
               results.append({'shape': shape, 'status': response.status, 'headers': dict(response.headers), 'body': wire.decode(errors='replace')})
               print(shape, response.status, wire[:500].decode(errors='replace'))

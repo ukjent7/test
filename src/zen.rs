@@ -66,7 +66,9 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> Option<Change> 
         return None;
     }
     let before = request.clone();
-    let had_tools = request["tools"].as_array().is_some_and(|tools| !tools.is_empty());
+    let had_tools = request["tools"]
+        .as_array()
+        .is_some_and(|tools| !tools.is_empty());
     request["stream"] = true.into();
     if !had_tools && request.get("tool_choice").is_none() {
         request["tool_choice"] = "none".into();
@@ -172,8 +174,10 @@ pub fn collapse(bytes: &[u8], endpoint: &str) -> Result<Value, ApiError> {
         }
         for choice in event["choices"].as_array().into_iter().flatten() {
             let index = choice["index"].as_u64().unwrap_or(0);
-            let output = choices.entry(index).or_insert_with(|| json!({"index": index,
-                "message": {"role": "assistant", "content": ""}, "finish_reason": null}));
+            let output = choices.entry(index).or_insert_with(|| {
+                json!({"index": index,
+                "message": {"role": "assistant", "content": ""}, "finish_reason": null})
+            });
             merge_delta(&mut output["message"], &choice["delta"]);
             if !choice["finish_reason"].is_null() {
                 output["finish_reason"] = choice["finish_reason"].clone();

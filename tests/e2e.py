@@ -156,7 +156,7 @@ def run(binary, checker, output):
                     elif case == "zen-free-invalid":
                         wire = b"data: invalid\n\ndata: [DONE]\n\n"
                     elif case == "zen-free-missing-done":
-                        wire = ZEN_WIRE.replace(b"data: [DONE]\n\n", b"")
+                        wire = ZEN_WIRE.replace(b"data: [DONE]\r\n\r\n", b"").replace(b"data: [DONE]\n\n", b"")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     if case == "zen-free-live":

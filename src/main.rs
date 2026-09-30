@@ -129,9 +129,7 @@ async fn messages(
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
         let free_error = serde_json::from_slice::<Value>(&bytes)
             .is_ok_and(|error| error["error"]["type"] == "FreeTierError");
-        if free_error
-            && let Some(change) = zen::prepare_free_body(&mut request, endpoint)
-        {
+        if free_error && let Some(change) = zen::prepare_free_body(&mut request, endpoint) {
             trace.diff.request.push(change);
             collapse = !client_streaming;
             upstream = gateway
@@ -141,7 +139,9 @@ async fn messages(
                 .body(serde_json::to_vec(&request).unwrap())
                 .send()
                 .await
-                .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+                .map_err(|error| {
+                    ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string())
+                })?;
         } else {
             return Ok((StatusCode::FORBIDDEN, original_headers, bytes).into_response());
         }
