@@ -39,9 +39,9 @@ jobs:
               except OSError:
                   time.sleep(.1)
           results = []
-          for shape in ('minimal', 'agent'):
-              body = {'model': 'opencode/mimo-v2.5-free', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 32, 'stream': shape == 'agent'}
-              if shape == 'agent':
+          for shape in ('stream_only', 'tools_only'):
+              body = {'model': 'opencode/mimo-v2.5-free', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 32, 'stream': shape == 'stream_only'}
+              if shape == 'tools_only':
                   body['tools'] = [{'type': 'function', 'function': {'name': name, 'description': name, 'parameters': {'type': 'object', 'properties': {}}}} for name in ('bash', 'edit', 'glob', 'grep', 'read')]
               (output / f'{shape}.request.json').write_text(json.dumps(body, indent=2))
               request = urllib.request.Request('http://127.0.0.1:8789/v1/chat/completions', json.dumps(body).encode(), {'Content-Type': 'application/json'})
