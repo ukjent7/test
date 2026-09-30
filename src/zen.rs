@@ -58,7 +58,9 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
         && signal.as_bytes()[4..16]
             .iter()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-        && signal.as_bytes()[16..].iter().all(u8::is_ascii_alphanumeric)
+        && signal.as_bytes()[16..]
+            .iter()
+            .all(u8::is_ascii_alphanumeric)
     {
         return signal.to_owned();
     }
@@ -80,8 +82,8 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
     let mut random = hash.finish();
     let mut suffix = [b'0'; 14];
     for byte in suffix.iter_mut().rev() {
-        *byte =
-            b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[(random % 62) as usize];
+        *byte = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+            [(random % 62) as usize];
         random /= 62;
     }
     format!("ses_{time:012x}{}", std::str::from_utf8(&suffix).unwrap())
