@@ -22,6 +22,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sudo apt-get update && sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libxdo3
           gh run download 36790348124 --name messages-gateway-ubuntu-latest --dir artifacts/bin
           chmod +x artifacts/bin/messages-gateway
           mkdir -p artifacts/zen-smoke
