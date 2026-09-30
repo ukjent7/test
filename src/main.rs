@@ -29,7 +29,7 @@ impl IntoResponse for ApiError {
             self.0,
             Json(json!({"type": "error", "error": {"type": kind, "message": self.1}})),
         )
-        .into_response()
+            .into_response()
     }
 }
 
@@ -40,14 +40,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let upstream = env::var("GATEWAY_UPSTREAM_BASE_URL")
         .unwrap_or_else(|_| "https://api.stepfun.ai/step_plan/v1".into());
-    let messages_url = reqwest::Url::parse(&format!("{}/messages", upstream.trim_end_matches('/')))?;
+    let messages_url =
+        reqwest::Url::parse(&format!("{}/messages", upstream.trim_end_matches('/')))?;
     if !matches!(messages_url.scheme(), "http" | "https")
         || messages_url.host_str().is_none()
         || messages_url.query().is_some()
         || messages_url.fragment().is_some()
     {
         return Err(
-            "GATEWAY_UPSTREAM_BASE_URL must be an HTTP(S) base URL without query or fragment".into(),
+            "GATEWAY_UPSTREAM_BASE_URL must be an HTTP(S) base URL without query or fragment"
+                .into(),
         );
     }
     let gateway = Arc::new(Gateway {

@@ -20,12 +20,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.90.0
           components: rustfmt, clippy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
@@ -53,7 +53,7 @@ jobs:
           python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "tests/grok-wire/target/release/grok-wire-check${suffix}"
       - name: Upload repeatable E2E evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ matrix.os }}
           path: |
@@ -62,7 +62,7 @@ jobs:
             tests/grok-wire/Cargo.lock
           if-no-files-found: warn
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: messages-gateway-${{ matrix.os }}
           path: |
