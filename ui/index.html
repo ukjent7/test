@@ -22,7 +22,7 @@
 
   <main>
     <section id="gateway" role="tabpanel" aria-labelledby="tab-gateway">
-      <div class="section-head"><h2>服务</h2><span class="subtle">本地运行 · Messages</span></div>
+      <div class="section-head"><h2>服务</h2><span class="subtle">本地运行 · 多上游</span></div>
       <div class="list">
         <div class="row status-row">
           <span class="service-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/></svg></span>
@@ -42,18 +42,18 @@
         <div><span>失败</span><strong id="errors">0</strong></div>
       </div>
 
-      <div class="section-head"><h2>接入</h2><span class="subtle">使用原有模型和密钥</span></div>
+      <div class="section-head"><h2>接入</h2><span class="subtle">按模型前缀选择上游</span></div>
       <div class="list">
         <div class="row connect-row">
           <span class="agent-icon" aria-hidden="true">G</span>
           <div class="grow"><strong>Grok Build</strong><div class="secondary">将模型的 base_url 指向此地址</div></div>
-          <span class="tag accent">Messages</span>
+          <span class="tag accent">3 种协议</span>
         </div>
         <div class="endpoint-row"><code data-testid="endpoint" id="endpoint">—</code><button class="pill" id="copy-endpoint" aria-label="复制地址">复制地址</button></div>
         <details>
           <summary>查看配置</summary>
           <div class="config"><pre id="config-example"></pre><button class="text-button" id="copy-config">复制配置</button></div>
-          <p class="config-note">在现有模型配置中替换这两个字段，然后重启 Grok Build。</p>
+          <p class="config-note">StepFun 使用 Messages；Zen 请按模型选择协议，然后重启 Grok Build。</p>
         </details>
       </div>
 
@@ -91,7 +91,7 @@
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">
       <div class="dialog-heading"><h2 id="settings-title">上游服务</h2><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
-      <p class="dialog-description">设置提供 Messages 服务的上游地址。</p>
+      <p class="dialog-description">分别设置两个上游的地址与密钥。</p>
       <label for="upstream-input">StepFun 上游基地址</label>
       <input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1">
       <label for="stepfun-key">StepFun API key</label>

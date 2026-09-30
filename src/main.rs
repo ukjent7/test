@@ -109,18 +109,62 @@ async fn messages(
     headers.remove(header::CONTENT_LENGTH);
     headers.insert(header::ACCEPT_ENCODING, "identity".parse().unwrap());
     url.set_query(uri.query());
-    let upstream = gateway
+    let client_streaming = request["stream"].as_bool().unwrap_or(false);
+    let mut collapse = false;
+    let mut upstream = gateway
         .client
-        .post(url)
-        .headers(headers)
+        .post(url.clone())
+        .headers(headers.clone())
         .body(serde_json::to_vec(&request).unwrap())
         .send()
         .await
         .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    if !anthropic && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
+        trace.status = 403;
+        let mut original_headers = upstream.headers().clone();
+        strip_hop_headers(&mut original_headers);
+        let bytes = upstream
+            .bytes()
+            .await
+            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        let free_error = serde_json::from_slice::<Value>(&bytes)
+            .is_ok_and(|error| error["error"]["type"] == "FreeTierError");
+        if free_error
+            && let Some(change) = zen::prepare_free_body(&mut request, endpoint)
+        {
+            trace.diff.request.push(change);
+            collapse = !client_streaming;
+            upstream = gateway
+                .client
+                .post(url)
+                .headers(headers)
+                .body(serde_json::to_vec(&request).unwrap())
+                .send()
+                .await
+                .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        } else {
+            return Ok((StatusCode::FORBIDDEN, original_headers, bytes).into_response());
+        }
+    }
     let status = upstream.status();
     trace.status = status.as_u16();
     let mut headers = upstream.headers().clone();
     strip_hop_headers(&mut headers);
+    let is_sse = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.split(';').next().unwrap_or("").trim() == "text/event-stream");
+    if collapse && status.is_success() && is_sse {
+        let bytes = upstream
+            .bytes()
+            .await
+            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        let value = zen::collapse(&bytes, endpoint)?;
+        headers.remove(header::CONTENT_LENGTH);
+        headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+        trace.result = "完成";
+        return Ok((status, headers, serde_json::to_vec(&value).unwrap()).into_response());
+    }
     if !status.is_success() || !anthropic {
         let successful = status.is_success();
         if successful {
@@ -147,10 +191,6 @@ async fn messages(
         return Ok(response);
     }
     headers.remove(header::CONTENT_LENGTH);
-    let is_sse = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.split(';').next().unwrap_or("").trim() == "text/event-stream");
     let body = if is_sse {
         trace.result = "取消";
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.

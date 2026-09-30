@@ -86,19 +86,23 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 .\messages-gateway.exe
 ```
 
-上游配置填写基地址，网关根据客户端接口追加 `/messages`、`/chat/completions` 或 `/responses`；三个接口均接受带 `/v1` 和不带 `/v1` 的路径，请求查询参数原样转发。`GET /v1/models`（或 `/models`）并行拉取两边 `/models`，保留每项元数据并为 ID 加上 `stepfun/` 或 `opencode/`。某边失败时返回另一边的列表和 `upstream_errors`，两边都失败时返回 502；不缓存模型目录。`GET /health` 返回 `ok`，其它推理协议返回 404。HTTP 错误及重定向原样交回客户端，不自动重试或跟随重定向。
+上游配置填写基地址，网关根据客户端接口追加 `/messages`、`/chat/completions` 或 `/responses`；三个接口均接受带 `/v1` 和不带 `/v1` 的路径，请求查询参数原样转发。`GET /v1/models`（或 `/models`）并行拉取两边 `/models`，保留每项元数据并为 ID 加上 `stepfun/` 或 `opencode/`。某边失败时返回另一边的列表和 `upstream_errors`，两边都失败时返回 502；不缓存模型目录。`GET /health` 返回 `ok`，其它推理协议返回 404。HTTP 错误及重定向原样交回客户端，不跟随重定向；只有下述 Zen 免费层形态错误会修正后重发一次。
 
 ## OpenCode Zen 上游
 
-在「编辑上游」中配置 Zen 地址和密钥，客户端模型填写 `opencode/<上游模型 ID>`，例如 `opencode/mimo-v2.5-free`；模型前缀在发往上游前删除，活动记录与请求 diff 保留路由证据。`stepfun/step-5-preview` 走 StepFun。没有自动故障切换，也不自动转换协议：据[官方 Zen 模型列表](https://opencode.ai/docs/en/zen/)，MiMo-V2.5 Free 使用 Chat Completions，客户端应选择该协议；Claude 模型使用 Messages，Responses 模型使用 Responses。Chat/Responses 的正文和响应原样透传，已有 thinking 修补仅作用于 Messages。
+在「编辑上游」中配置 Zen 地址和密钥，匿名免费模型可填 `public`。客户端模型填写 `opencode/<上游模型 ID>`，例如 `opencode/mimo-v2.5-free`；模型前缀在发往上游前删除，活动记录与请求 diff 保留路由证据。`stepfun/step-5-preview` 走 StepFun。没有自动故障切换，也不自动转换协议：据[官方 Zen 模型列表](https://opencode.ai/docs/en/zen/)，MiMo-V2.5 Free 使用 Chat Completions，客户端应选择该协议；Claude 模型使用 Messages，Responses 模型使用 Responses。正常 Chat/Responses 正文和响应原样透传，已有 thinking 修补仅作用于 Messages。
 
 仅当实际转发目标主机为 `opencode.ai`、路径为 `/zen/v1/messages`、`/zen/v1/chat/completions`、`/zen/v1/responses` 或 `/zen/v1/models` 时进行必要伪装。参照本地 `opencode2api`（`79a208a4679106c4643edb1efa1a5f79011e0a6e`）的 `internal/httpx/client.go`、`internal/identity/request.go` 与 `internal/gateway/upstream.go`，发送 `User-Agent: opencode/1.18.31` 和 `x-opencode-session`。会话格式采用 `ses_` + 12 小写十六进制字符 + 14 Base62 字符；合法 OpenCode 会话原样保留，其它会话标识在当前构建中确定性映射。优先使用 `x-opencode-session`、`x-session-affinity`、`x-session-id`、`conversation-id`、正文 `metadata.session_id` / `conversation_id`；没有标识时使用第一条用户消息或 Responses input，后续历史增长不改变会话。映射包含实际上游凭证以区分账户，结果仅用于路由关联，不是鉴权凭证。
 
 Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropic-version` / `anthropic-beta`，版本缺失时补 `2023-06-01`；Chat/Responses/模型列表使用 Bearer 鉴权，不发送 Anthropic 头。设置 JSON Content-Type、JSON/SSE Accept 和 `Accept-Encoding: identity`，由 HTTP 客户端重算 Host 与 Content-Length。原客户端 User-Agent、Cookie、Forwarded、SDK 和追踪头全部清除。其它上游继续原有透传规则，配置密钥覆盖客户端凭证。
 
-没有复制参考项目的项目/请求 ID、额外会话关联头、固定 Anthropic beta、匿名凭证、工具注入和强制流式转换。前两项身份头是此次实现的最小范围：[OpenCode 会话 ID 源码](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts)给出格式，[官方 Zen handler](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/util/handler.ts)读取客户端与会话信息用于关联和路由；[官方仓库中的接入测试报告](https://github.com/anomalyco/opencode/issues/49433)观察到 User-Agent 与会话 ID 是两个独立检查，client/project/request 头和工具列表不是该报告环境的必要条件。参考项目仍会为免费模型强制 stream 并补 `bash/edit/glob/grep/read` 工具，这会改变调用语义，本次保留原有 stream、tools、system、模型和正文（已有 thinking 兼容处理仍生效）。部署要求可能不同，免费层如要求额外代理形态，可能仍返回限制错误；本地 E2E 不证明线上免费层接受请求。
+必要性分析：参考项目的 UA 与会话形态可保留；项目/请求 ID、额外会话关联头、client 标记和固定 Anthropic beta 没有纳入实现。[会话 ID 源码](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts)定义格式，[官方 Zen handler](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/util/handler.ts)读取会话信息用于关联和路由。2026-09-30 的 Actions 线上探测发现，MiMo 仅有头伪装时返回 403 FreeTierError，单独加 stream 或五个工具也被拒绝，二者同时存在则返回 200；工具选择设为 none 仍返回 200。证据：[组合对比](https://github.com/ukjent7/test/actions/runs/36790864322)、[逐项对比](https://github.com/ukjent7/test/actions/runs/36791039662)、[禁用占位工具调用](https://github.com/ukjent7/test/actions/runs/36791436498)。这些结果比旧接入报告更贴近当前部署。
 
-CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单；GUI E2E 保存两个上游的设置、模型列表、密钥隐藏和重启持久化证据。
+因此，只对 Zen Chat/Responses 的 `403 + error.type == FreeTierError` 补充 `stream: true` 和缺少的 `bash/edit/glob/grep/read` 工具，沿用原会话、密钥、地址重发一次；已满足形态时不重发，不硬编码免费模型列表，不改变正常付费请求。已有工具、参数和工具选择保留；原本没有工具且没有指定工具选择时设置 `tool_choice: none`，占位定义也标明不应调用。若客户端要求非流式，Chat 合并文字、reasoning、工具增量、多 choice 和 usage，Responses 取终止事件的完整 response，返回 JSON；缺少终止事件、坏 JSON 或网络截断返回 502。原本要求流式时继续即时透传。必要的正文修改记录在请求 diff；stream/tools 外的原有正文保持不变。
+
+`tests/fixtures/zen-chat.sse` 保存上述真实 MiMo 流用于确定性回归。线上探测使用 public 凭证与虚构测试消息，没有使用配置中的个人密钥；探测的请求、响应、报告和 SHA-256 清单由 Actions 归档。
+
+CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单；GUI E2E 保存两个上游的设置、模型列表、密钥隐藏和重启持久化证据。
 
 ## GitHub Actions 验证
 
