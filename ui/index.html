@@ -84,9 +84,13 @@
     <form id="settings-form">
       <div class="dialog-heading"><h2 id="settings-title">上游服务</h2><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
       <p class="dialog-description">设置提供 Messages 服务的上游地址。</p>
+      <div class="upstream-presets" aria-label="上游预设">
+        <button type="button" class="pill" data-upstream="https://api.stepfun.ai/step_plan/v1">StepFun</button>
+        <button type="button" class="pill" data-upstream="https://opencode.ai/zen/v1">OpenCode Zen</button>
+      </div>
       <label for="upstream-input">上游基地址</label>
       <input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1">
-      <p class="hint">填写基地址，保存后立即用于新请求。</p>
+      <p class="hint">选择预设或填写基地址，保存后立即用于新请求。Zen 自动处理客户端身份与请求头；请使用对应上游的模型和密钥。</p>
       <p class="field-error" data-testid="settings-error" id="settings-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="pill" id="cancel-settings">取消</button><button type="submit" class="primary" id="save-settings">保存</button></div>
     </form>

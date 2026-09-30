@@ -9,6 +9,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import threading
@@ -101,18 +102,18 @@ def run(binary, checker, output):
             pass
 
         def do_POST(self):
-            case = self.headers["x-e2e-case"]
             body = self.rfile.read(int(self.headers["content-length"]))
+            case = self.headers.get("x-e2e-case") or json.loads(body)["model"]
             captures[case] = {"path": self.path, "headers": dict(self.headers),
                               "body": json.loads(body)}
-            if case.startswith("error-") or case == "redirect":
-                status = int(case.split("-")[1]) if case != "redirect" else 307
+            if case.startswith(("error-", "zen-error-")) or case == "redirect":
+                status = int(case.rsplit("-", 1)[1]) if case != "redirect" else 307
                 wire = b'{"type":"error","error":{"type":"api_error","message":"fixture"}}'
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Retry-After", "7")
                 self.send_header("Location", "/must-not-follow")
-            elif case.startswith("json") or case == "followup":
+            elif case.startswith(("json", "zen-json")) or case == "followup":
                 message = {**MESSAGE, "stop_reason": "end_turn", "content": [
                     {"type": "thinking", "thinking": "分析"},
                     {"type": "thinking", "thinking": "signed", "signature": "valid"},
@@ -152,7 +153,7 @@ def run(binary, checker, output):
                     self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
                     self.wfile.flush()
 
-                if case == "sse-live":
+                if case in ("sse-live", "zen-sse-live"):
                     first = frame(START)
                     send_chunk(first)
                     if not release.wait(10):
@@ -175,6 +176,9 @@ def run(binary, checker, output):
     port = free_port()
     env = {**os.environ, "GATEWAY_CONFIG": str(output.resolve() / "settings.json"),
            "GATEWAY_LISTEN": f"127.0.0.1:{port}",
+           "HTTP_PROXY": f"http://127.0.0.1:{upstream.server_port}",
+           "http_proxy": f"http://127.0.0.1:{upstream.server_port}",
+           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/step_plan/v1/"}
     log = (output / "gateway.log").open("wb")
     process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
@@ -187,7 +191,7 @@ def run(binary, checker, output):
         assert expected in result, result
 
     def post(case, payload=None, path="/v1/messages?beta=true", live=False,
-             truncated=False, api_key=False):
+             truncated=False, api_key=False, extra_headers=None):
         payload = payload or {"model": "step-5-preview", "max_tokens": 512,
                               "stream": not case.startswith("json"),
                               "messages": [{"role": "user", "content": "你好"}]}
@@ -196,6 +200,7 @@ def run(binary, checker, output):
                    "Connection": "keep-alive, x-client-hop", "x-client-hop": "remove-me"}
         headers.update({"x-api-key": "dummy-api-key"} if api_key
                        else {"Authorization": "Bearer dummy-token"})
+        headers.update(extra_headers or {})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         connection.request("POST", path, json.dumps(payload).encode(), headers)
         response = connection.getresponse()
@@ -327,6 +332,121 @@ def run(binary, checker, output):
         for path in ("/v1/responses", "/v1/chat/completions"):
             assert post(path.rsplit("/", 1)[1], path=path)[0] == 404
             passed(path)
+
+        def set_upstream(base):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                connection.request("POST", "/ui/settings", json.dumps({"upstream_base_url": base}),
+                                   {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                assert response.status == 204, response.read()
+                response.read()
+            finally:
+                connection.close()
+
+        # Real hostname through a local HTTP proxy, with no production test switch.
+        set_upstream("http://opencode.ai/zen/v1/")
+        dirty = {"User-Agent": "grok-build/test", "Cookie": "client-cookie",
+                 "Forwarded": "for=192.0.2.1", "X-Forwarded-For": "192.0.2.1",
+                 "X-Stainless-Lang": "rust", "X-Stainless-Package-Version": "test",
+                 "X-Request-Id": "private-request", "Traceparent": "private-trace",
+                 "X-Session-Id": "foreign-session", "x-opencode-request": "foreign-request",
+                 "x-opencode-project": "foreign-project", "x-opencode-client": "grok",
+                 "x-session-affinity": "foreign-session"}
+
+        def zen_post(case, extra=None, streaming=False, content="first turn"):
+            payload = {"model": case, "max_tokens": 512, "stream": streaming,
+                       "system": "retain system", "tools": [{"name": "read_file",
+                       "input_schema": {"type": "object"}}],
+                       "messages": [{"role": "user", "content": content}]}
+            status, _, wire = post(case, payload, live=case == "zen-sse-live",
+                                   extra_headers={**dirty, **(extra or {})})
+            assert status == 200
+            capture = captures[case]
+            assert capture["body"] == payload, capture
+            assert capture["path"] == "http://opencode.ai/zen/v1/messages?beta=true"
+            forwarded = {k.lower(): v for k, v in capture["headers"].items()}
+            assert forwarded["user-agent"] == "opencode/1.18.31"
+            assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-session"])
+            assert forwarded["x-api-key"] == "dummy-token"
+            assert forwarded["anthropic-version"] == "2023-06-01"
+            assert forwarded["anthropic-beta"] == "test-beta"
+            assert set(forwarded) <= {"host", "content-length", "content-type", "accept",
+                                      "accept-encoding", "user-agent", "x-opencode-session",
+                                      "x-api-key", "anthropic-version", "anthropic-beta"}, forwarded
+            passed(case)
+            return forwarded["x-opencode-session"], wire
+
+        session, _ = zen_post("zen-json-headers")
+        again, _ = zen_post("zen-json-followup", content="different turn")
+        assert session == again, "explicit session must survive history changes"
+        other, _ = zen_post("zen-json-other-session", {"X-Session-Id": "another-session",
+                                                      "x-session-affinity": "another-session"})
+        assert session != other
+        canonical = "ses_abcdef123456aB0Cd1Ef2Gh3Ij"
+        preserved, _ = zen_post("zen-json-canonical", {"x-opencode-session": canonical})
+        assert preserved == canonical
+        release.clear()
+        _, wire = zen_post("zen-sse-live", streaming=True)
+        assert decode_sse(wire)[1]["content_block"]["signature"] == ""
+
+        for code in (401, 429, 500):
+            case = f"zen-error-{code}"
+            payload = {"model": case, "max_tokens": 64, "stream": False,
+                       "messages": [{"role": "user", "content": "hello"}]}
+            status, headers, wire = post(case, payload)
+            assert status == code and headers["retry-after"] == "7"
+            assert json.loads(wire)["error"]["message"] == "fixture"
+            passed(case)
+
+        # Without an explicit identity, only the first user turn seeds the session.
+        seeds = []
+        for case, first in (("zen-json-seed", "same first"), ("zen-json-seed-followup", "same first"),
+                            ("zen-json-seed-other", "other first")):
+            payload = {"model": case, "max_tokens": 64, "stream": False,
+                       "messages": [{"role": "user", "content": first}]}
+            if case.endswith("followup"):
+                payload["messages"] += [{"role": "assistant", "content": "reply"},
+                                        {"role": "user", "content": "next turn"}]
+            assert post(case, payload, api_key=True)[0] == 200
+            forwarded = {k.lower(): v for k, v in captures[case]["headers"].items()}
+            assert forwarded["x-api-key"] == "dummy-api-key"
+            seeds.append(forwarded["x-opencode-session"])
+            passed(case)
+        assert seeds[0] == seeds[1] and seeds[0] != seeds[2]
+
+        defaults = {"model": "zen-json-defaults", "max_tokens": 64,
+                    "stream": False, "messages": [{"role": "user", "content": "hello"}]}
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            connection.request("POST", "/messages", json.dumps(defaults),
+                               {"Content-Type": "application/json", "Authorization": "Bearer ignored",
+                                "x-api-key": "preferred-key"})
+            response = connection.getresponse()
+            assert response.status == 200
+            response.read()
+        finally:
+            connection.close()
+        forwarded = {k.lower(): v for k, v in captures["zen-json-defaults"]["headers"].items()}
+        assert forwarded["x-api-key"] == "preferred-key"
+        assert forwarded["anthropic-version"] == "2023-06-01"
+        assert "authorization" not in forwarded
+        (output / "zen-defaults.json").write_text(json.dumps(captures["zen-json-defaults"], indent=2))
+        passed("zen-json-defaults")
+
+        for i, base in enumerate(("http://opencode.ai.example/zen/v1", "http://sub.opencode.ai/zen/v1",
+                                  "http://opencode.ai/zen/v10", "http://opencode.ai/zen/go/v1")):
+            set_upstream(base)
+            case = f"json-not-zen-{i}"
+            assert post(case, extra_headers={"User-Agent": "original-client", "Cookie": "keep"})[0] == 200
+            forwarded = {k.lower(): v for k, v in captures[case]["headers"].items()}
+            assert forwarded["user-agent"] == "original-client" and forwarded["cookie"] == "keep"
+            assert "x-opencode-session" not in forwarded
+            passed(case)
+        set_upstream(env["GATEWAY_UPSTREAM_BASE_URL"])
+        assert post("json-switch-back", extra_headers={"User-Agent": "original-client"})[0] == 200
+        assert captures["json-switch-back"]["headers"]["user-agent"] == "original-client"
+        passed("json-switch-back")
         report["status"] = "passed"
     except BaseException as error:
         report["status"] = "failed"

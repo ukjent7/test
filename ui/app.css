@@ -126,6 +126,7 @@ dialog::backdrop { background:#0004; }
 .dialog-heading { display:flex; align-items:center; justify-content:space-between; }
 .dialog-heading h2 { font-size:15px; font-weight:600; }
 .dialog-description { color:var(--muted); font-size:11px; margin:8px 0 22px; }
+.upstream-presets { display:flex; gap:9px; margin-bottom:16px; }
 label { display:block; font-size:11px; color:var(--secondary); margin-bottom:7px; }
 input { color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:7px; padding:10px; width:100%; font:11px/1.6 var(--code); }
 .hint { color:var(--muted); font-size:10.5px; margin-top:7px; }

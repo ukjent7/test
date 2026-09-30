@@ -7,7 +7,7 @@ Rust 编写的 Messages 网关。第二版提供桌面 GUI，界面借鉴本地 
 双击 `messages-gateway.exe` 打开原生窗口并启动网关。系统 WebView 显示随程序内嵌的 HTML/CSS/JS，无须安装 Node 或前端资源。关闭窗口即退出程序和网关。
 
 - 查看实时运行状态，开启或停止新请求转发；停止不打断已经开始的请求。
-- 编辑上游地址，立即用于新请求，并保存供下次启动使用。
+- 在 StepFun 与 OpenCode Zen 两个上游预设间切换，或编辑自定义地址；保存后立即用于新请求，并供下次启动使用。
 - 复制 Grok Build 接入地址或配置片段。
 - 查看本次运行请求数、修补数量、错误及最近 30 条请求。
 - 在活动记录中点击「查看差异」，分别查看请求和响应被修改的内容，红色表示修改前，绿色表示修改后；支持复制差异。
@@ -76,6 +76,18 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 ```
 
 上游配置填写基地址，网关追加 `/messages`；请求查询参数原样转发。`GET /health` 返回 `ok`。其它推理协议返回 404。HTTP 错误及重定向原样交回客户端，不自动重试或跟随重定向。
+
+## OpenCode Zen 上游
+
+在「编辑上游」中选择 OpenCode Zen 并保存，地址为 `https://opencode.ai/zen/v1`。接入端仍使用本地 `/v1`，模型和密钥须改为 Zen 对应值；第二上游作为可切换预设，不做自动故障切换。
+
+仅当实际转发目标主机为 `opencode.ai`、路径为 `/zen/v1/messages` 时进行必要伪装。参照本地 `opencode2api`（`79a208a4679106c4643edb1efa1a5f79011e0a6e`）的 `internal/httpx/client.go`、`internal/identity/request.go` 与 `internal/gateway/upstream.go`，发送 `User-Agent: opencode/1.18.31` 和 `x-opencode-session`。会话格式采用 `ses_` + 12 小写十六进制字符 + 14 Base62 字符；合法 OpenCode 会话原样保留，其它会话标识在当前构建中确定性映射。优先使用 `x-opencode-session`、`x-session-affinity`、`x-session-id`、`conversation-id`、正文 `metadata.session_id` / `conversation_id`；没有标识时使用第一条用户消息，后续历史增长不改变会话。映射包含入站凭证以区分账户，结果仅用于路由关联，不是鉴权凭证。
+
+Zen 请求头按白名单重建：保留 `x-api-key`（优先）或将 Bearer 密钥转换为 `x-api-key`，保留 `anthropic-version` / `anthropic-beta`，版本缺失时补 `2023-06-01`；设置 JSON Content-Type、JSON/SSE Accept 和 `Accept-Encoding: identity`，由 HTTP 客户端重算 Host 与 Content-Length。原客户端 User-Agent、Cookie、Forwarded、SDK 和追踪头全部清除。其它上游继续原有透传规则。
+
+没有复制参考项目的项目/请求 ID、额外会话关联头、固定 Anthropic beta、匿名凭证、工具注入和强制流式转换。前两项身份头是此次实现的最小范围：[OpenCode 会话 ID 源码](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts)给出格式，[官方 Zen handler](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/util/handler.ts)读取客户端与会话信息用于关联和路由；[官方仓库中的接入测试报告](https://github.com/anomalyco/opencode/issues/49433)观察到 User-Agent 与会话 ID 是两个独立检查，client/project/request 头和工具列表不是该报告环境的必要条件。参考项目仍会为免费模型强制 stream 并补 `bash/edit/glob/grep/read` 工具，这会改变调用语义，本次保留原有 stream、tools、system、模型和正文（已有 thinking 兼容处理仍生效）。部署要求可能不同，免费层如要求额外代理形态，可能仍返回限制错误；本地 E2E 不证明线上免费层接受请求。
+
+CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证头清洗、鉴权、会话稳定性、JSON/SSE、相近域名与路径不触发伪装、切回普通上游，并保留请求/响应及 SHA-256 清单；GUI E2E 保存预设选择截图与持久化证据。
 
 ## GitHub Actions 验证
 

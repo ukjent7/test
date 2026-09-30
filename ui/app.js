@@ -186,6 +186,12 @@ byId('edit-upstream').addEventListener('click', () => {
 });
 byId('close-settings').addEventListener('click', () => dialog.close());
 byId('cancel-settings').addEventListener('click', () => dialog.close());
+for (const preset of document.querySelectorAll('[data-upstream]')) {
+  preset.addEventListener('click', () => {
+    byId('upstream-input').value = preset.dataset.upstream;
+    byId('settings-error').hidden = true;
+  });
+}
 byId('settings-form').addEventListener('submit', async event => {
   event.preventDefault();
   byId('save-settings').disabled = true;

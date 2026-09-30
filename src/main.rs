@@ -2,6 +2,7 @@
 
 mod app;
 mod desktop;
+mod zen;
 
 use std::{env, io, net::SocketAddr, sync::Arc};
 
@@ -84,6 +85,9 @@ async fn messages(
     };
     trace.diff.request = normalize_history(&mut request);
     strip_hop_headers(&mut headers);
+    if zen::is_zen(&url) {
+        zen::prepare_headers(&mut headers, &request);
+    }
     headers.remove(header::HOST);
     headers.remove(header::CONTENT_LENGTH);
     headers.insert(header::ACCEPT_ENCODING, "identity".parse().unwrap());

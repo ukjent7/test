@@ -147,6 +147,24 @@ def run(binary, output):
         page.keyboard.press("Escape")
         expect(page.get_by_role("dialog")).not_to_be_visible()
         passed("keyboard-dismiss")
+        original_upstream = context.request.get(address + "/ui/status").json()["upstream_base_url"]
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        page.get_by_role("button", name="OpenCode Zen", exact=True).click()
+        expect(page.get_by_label("上游基地址", exact=True)).to_have_value("https://opencode.ai/zen/v1")
+        page.get_by_role("button", name="取消", exact=True).click()
+        assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == original_upstream
+        assert not settings_path.exists()
+        passed("zen-preset-cancel-keeps-upstream")
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        page.get_by_role("button", name="StepFun", exact=True).click()
+        expect(page.get_by_label("上游基地址", exact=True)).to_have_value("https://api.stepfun.ai/step_plan/v1")
+        page.get_by_role("button", name="OpenCode Zen", exact=True).click()
+        page.screenshot(path=str(output / "zen-preset.png"))
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        expect(page.get_by_test_id("upstream")).to_have_text("https://opencode.ai/zen/v1")
+        assert json.loads(settings_path.read_text())["upstream_base_url"] == "https://opencode.ai/zen/v1"
+        passed("zen-preset-save")
         upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
         page.get_by_role("button", name="编辑上游", exact=True).click()
         page.get_by_label("上游基地址", exact=True).fill(upstream_url)

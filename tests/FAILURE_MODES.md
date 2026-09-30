@@ -47,3 +47,15 @@ GUI E2E 在 CI 操作真实控件，Windows 连接实际桌面 WebView2，Linux 
 7. diff 在实际桌面窗口、深色或窄窗口中不可读，键盘 Escape 无法关闭。
 
 E2E 穿过真实 HTTP 上游和网关，并操作 GUI 查看实际修改。产物增加 JSON/SSE diff 快照、请求前后对应证据、浅色/深色/窄窗口 diff 截图；继续验证原有协议与 GUI 场景。
+
+## Zen 第二上游：实现前确定的失败场景
+
+1. Zen 预设不能选择、取消也保存，或保存/重启后地址不一致；StepFun 和自定义地址失效。
+2. 用入站 Host 或 URL 子串判断 Zen，使其它域名、子域名、相近路径也触发伪装。
+3. Zen 收到原客户端 User-Agent、Cookie、Forwarded、X-Forwarded-*、SDK 标识或追踪头；重复鉴权头和 Connection 指定的头穿透清洗。
+4. Bearer 密钥未转换为 Messages 的 x-api-key，或已有 x-api-key 被覆盖；anthropic-version/beta 丢失；缺失版本未补默认值。
+5. 会话 ID 不符合 ses_ + 12 小写十六进制 + 14 字母数字的格式，同一会话的后续请求改变 ID，合法 OpenCode 会话被重写，或不同会话混用。
+6. 伪装改变 stream、tools、system、模型、查询参数或正文；Zen SSE 首事件等待完整响应，错误码被吞掉。
+7. 新会话头、密钥、原始会话 ID 被记录进 UI 差异或设置文件；切回其它上游仍保留 Zen 伪装。
+
+CI 使用本机 HTTP 代理接收以 opencode.ai 为真实目标主机的请求，不连接在线服务；保留各场景请求头/正文、响应、会话关联断言、报告和 SHA-256 清单，GUI 保存 Zen 预设截图。测试仅使用虚构凭证，在线免费层限制不由本地夹具证明。
