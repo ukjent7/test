@@ -102,6 +102,8 @@ Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropi
 
 `tests/fixtures/zen-chat.sse` 保存上述真实 MiMo 流用于确定性回归。线上探测使用 public 凭证与虚构测试消息，没有使用配置中的个人密钥；探测的请求、响应、报告和 SHA-256 清单由 Actions 归档。
 
+[最终线上接入验证](https://github.com/ukjent7/test/actions/runs/36792610882)：真实网关使用配置中的 public 密钥，客户端不带密钥，以 `opencode/mimo-v2.5-free` 发送普通非流式请求；网关修正免费层形态并返回 200 Chat JSON，内容为 OK。临时线上探测工作流已移除，常规 CI 继续使用本机夹具以保证回归可重复；历史探测可从对应 Actions 运行重放。
+
 CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单；GUI E2E 保存两个上游的设置、模型列表、密钥隐藏和重启持久化证据。
 
 ## GitHub Actions 验证
