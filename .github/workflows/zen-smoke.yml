@@ -1,0 +1,59 @@
+name: Zen free model smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download gateway and probe minimal free-model requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 36790348124 --name messages-gateway-ubuntu-latest --dir artifacts/bin
+          chmod +x artifacts/bin/messages-gateway
+          mkdir -p artifacts/zen-smoke
+          GATEWAY_CONFIG="$PWD/artifacts/zen-smoke/settings.json" GATEWAY_OPENCODE_API_KEY=public artifacts/bin/messages-gateway --headless > artifacts/zen-smoke/gateway.log 2>&1 &
+          trap 'kill $!' EXIT
+          python - <<'PY'
+          import hashlib, json, time, urllib.request, urllib.error
+          from pathlib import Path
+          output = Path('artifacts/zen-smoke')
+          for _ in range(100):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:8789/health').close()
+                  break
+              except OSError:
+                  time.sleep(.1)
+          results = []
+          for shape in ('minimal', 'agent'):
+              body = {'model': 'opencode/mimo-v2.5-free', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 32, 'stream': shape == 'agent'}
+              if shape == 'agent':
+                  body['tools'] = [{'type': 'function', 'function': {'name': name, 'description': name, 'parameters': {'type': 'object', 'properties': {}}}} for name in ('bash', 'edit', 'glob', 'grep', 'read')]
+              (output / f'{shape}.request.json').write_text(json.dumps(body, indent=2))
+              request = urllib.request.Request('http://127.0.0.1:8789/v1/chat/completions', json.dumps(body).encode(), {'Content-Type': 'application/json'})
+              try:
+                  response = urllib.request.urlopen(request, timeout=60)
+              except urllib.error.HTTPError as error:
+                  response = error
+              wire = response.read()
+              (output / f'{shape}.response.bin').write_bytes(wire)
+              results.append({'shape': shape, 'status': response.status, 'headers': dict(response.headers), 'body': wire.decode(errors='replace')})
+              print(shape, response.status, wire[:500].decode(errors='replace'))
+          (output / 'report.json').write_text(json.dumps(results, indent=2))
+          (output / 'sha256.json').write_text(json.dumps({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.is_file()}, indent=2))
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: zen-smoke
+          path: artifacts/zen-smoke/

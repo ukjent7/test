@@ -177,7 +177,10 @@ impl Drop for Trace {
 }
 
 impl Gateway {
-    pub(crate) fn upstreams(&self, endpoint: &str) -> Result<[(reqwest::Url, String); 2], ApiError> {
+    pub(crate) fn upstreams(
+        &self,
+        endpoint: &str,
+    ) -> Result<[(reqwest::Url, String); 2], ApiError> {
         let control = self.control.lock().unwrap();
         if !control.settings.enabled {
             return Err(ApiError(
