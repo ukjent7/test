@@ -97,6 +97,23 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .call .duration,.call .repair { color:var(--secondary); font-size:10.5px; text-align:right; }
 .call .outcome { font-size:10px; padding:2px 7px; border-radius:5px; color:var(--green); background:var(--green-soft); text-align:center; }
 .call .outcome.failed { color:var(--red); background:var(--red-soft); }
+.diff-button { padding:0; margin-top:7px; font-size:10px; text-align:left; }
+#diff-dialog { width:min(660px,calc(100% - 36px)); max-height:calc(100% - 36px); }
+.diff-legend { display:flex; flex-wrap:wrap; gap:12px; color:var(--muted); font-size:10px; margin-bottom:18px; }
+#diff-content { font-size:11px; }
+#diff-content section+section { margin-top:22px; }
+#diff-content h3 { font-size:12px; font-weight:600; margin:0 0 10px; }
+.diff-item { border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:10px; }
+.diff-item strong,.diff-item>code,.diff-event { display:block; padding:8px 12px 0; overflow-wrap:anywhere; }
+.diff-item>code,.diff-event { color:var(--muted); font-size:10px; }
+.diff-item>code:last-of-type { padding-bottom:8px; }
+.diff-event { padding-top:0; padding-bottom:8px; }
+.diff-item pre { margin:0; padding:7px 12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.removed { color:var(--red); }
+.added { color:var(--green); }
+.diff-item .removed { background:var(--red-soft); }
+.diff-item .added { background:var(--green-soft); }
+.diff-empty { color:var(--muted); background:var(--bg); padding:12px; border-radius:8px; font-size:11px; }
 .privacy-note { margin:12px 2px; font-size:10.5px; color:var(--muted); }
 footer { position:fixed; bottom:0; left:0; right:0; height:37px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--line); background:var(--bg); color:var(--muted); font-size:10px; padding:0 28px; }
 .footer-dot { width:5px; height:5px; background:var(--muted); border-radius:50%; }

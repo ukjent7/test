@@ -9,14 +9,14 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, DefaultBodyLimit, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{ApiError, messages};
 
@@ -43,6 +43,57 @@ struct Call {
     repairs: usize,
     duration_ms: u128,
     timestamp: u128,
+    request_changes: usize,
+    response_changes: usize,
+    #[serde(skip_serializing)]
+    diff: Diff,
+}
+
+#[derive(Default, Serialize)]
+pub struct Diff {
+    pub request: Vec<Change>,
+    pub response: Vec<Change>,
+}
+
+#[derive(Serialize)]
+pub struct Change {
+    pub path: String,
+    pub after_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<Value>,
+    pub reason: &'static str,
+    pub event: Option<String>,
+}
+
+impl Change {
+    pub fn new(
+        path: String,
+        mut before: Option<Value>,
+        mut after: Option<Value>,
+        reason: &'static str,
+    ) -> Self {
+        if let (Some(Value::Object(before)), Some(Value::Object(after))) = (&mut before, &mut after) {
+            let unchanged: Vec<String> = before
+                .iter()
+                .filter(|(key, value)| after.get(*key) == Some(*value))
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in unchanged {
+                before.remove(&key);
+                after.remove(&key);
+            }
+        }
+        Self {
+            after_path: path.clone(),
+            path,
+            before,
+            after,
+            reason,
+            event: None,
+        }
+    }
 }
 
 pub struct Control {
@@ -67,6 +118,7 @@ pub struct Trace {
     pub status: u16,
     pub result: &'static str,
     pub repairs: usize,
+    pub diff: Diff,
 }
 
 impl Trace {
@@ -82,6 +134,7 @@ impl Trace {
             status: 502,
             result: "失败",
             repairs: 0,
+            diff: Diff::default(),
         }
     }
 }
@@ -103,6 +156,9 @@ impl Drop for Trace {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis(),
+            request_changes: self.diff.request.len(),
+            response_changes: self.diff.response.len(),
+            diff: std::mem::take(&mut self.diff),
         });
         control.calls.truncate(30);
     }
@@ -198,6 +254,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     });
     let ui = Router::new()
         .route("/ui/status", get(status))
+        .route("/ui/calls/{id}", get(call_diff))
         .route("/ui/settings", post(update_settings))
         .route("/ui/enabled", post(set_enabled))
         .layer(middleware::from_fn(local_control));
@@ -264,6 +321,17 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Json<serde_json::Value> 
         "endpoint": format!("http://{}/v1", gateway.listen),
         "stats": control.stats, "calls": control.calls,
     }))
+}
+
+async fn call_diff(
+    State(gateway): State<Arc<Gateway>>,
+    Path(id): Path<u64>,
+) -> Result<Json<Value>, ApiError> {
+    let control = gateway.control.lock().unwrap();
+    let call = control.calls.iter().find(|call| call.id == id).ok_or_else(|| {
+        ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into())
+    })?;
+    Ok(Json(json!({"call": call, "diff": call.diff})))
 }
 
 #[derive(Deserialize)]

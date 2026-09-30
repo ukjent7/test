@@ -7,6 +7,8 @@ let current = null;
 let busy = false;
 let toastTimer;
 let callsKey = '';
+let diffRequest = 0;
+let diffDetail = null;
 
 async function request(path, body) {
   const response = await fetch(path, body === undefined ? {} : {
@@ -31,7 +33,7 @@ async function copy(text) {
     await navigator.clipboard.writeText(text);
     notify('已复制');
   } catch {
-    notify('复制失败，请手动选择并复制地址');
+    notify('复制失败，请手动选择并复制内容');
   }
 }
 
@@ -52,9 +54,86 @@ function renderCalls(calls) {
     row.querySelector('.outcome').classList.toggle('failed', call.result === '失败');
     row.querySelector('.duration').textContent = `${call.duration_ms} ms`;
     row.querySelector('.repair').textContent = call.repairs ? `修补 ${call.repairs}` : '—';
+    const button = document.createElement('button');
+    button.className = 'text-button diff-button';
+    button.textContent = `查看差异 · 请求 ${call.request_changes} / 响应 ${call.response_changes}`;
+    button.setAttribute('aria-label', `查看差异 #${call.id}`);
+    button.addEventListener('click', () => showDiff(call.id));
+    row.firstElementChild.append(button);
     list.append(row);
   }
 }
+
+function diffLine(parent, kind, text) {
+  const line = document.createElement('pre');
+  line.className = kind;
+  line.textContent = text;
+  parent.append(line);
+}
+
+function renderDiff(diff) {
+  const content = byId('diff-content');
+  content.replaceChildren();
+  for (const [direction, title] of [['request', '请求 · Grok Build → 上游'], ['response', '响应 · 上游 → Grok Build']]) {
+    const section = document.createElement('section');
+    section.dataset.testid = `diff-${direction}`;
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    section.append(heading);
+    if (!diff[direction].length) diffLine(section, 'diff-empty', '未记录内容修改');
+    for (const change of diff[direction]) {
+      const item = document.createElement('div');
+      item.className = 'diff-item';
+      const label = document.createElement('strong');
+      label.textContent = change.reason;
+      const path = document.createElement('code');
+      path.textContent = change.path === change.after_path || !Object.hasOwn(change, 'after')
+        ? change.path : `${change.path} → ${change.after_path}`;
+      item.append(label, path);
+      if (change.event) {
+        const event = document.createElement('span');
+        event.className = 'diff-event';
+        event.textContent = change.event;
+        item.append(event);
+      }
+      if (Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
+        for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
+          const format = value => Object.hasOwn(value, key) ? JSON.stringify(value[key], null, 2) : '（字段不存在）';
+          diffLine(item, 'removed', `− ${key}: ${format(change.before)}`);
+          diffLine(item, 'added', `+ ${key}: ${format(change.after)}`);
+        }
+      } else {
+        diffLine(item, 'removed', `− ${JSON.stringify(change.before, null, 2)}`);
+        diffLine(item, 'added', '+ （已删除）');
+      }
+      section.append(item);
+    }
+    content.append(section);
+  }
+}
+
+async function showDiff(id) {
+  const sequence = ++diffRequest;
+  diffDetail = null;
+  byId('copy-diff').disabled = true;
+  byId('diff-meta').textContent = `请求 #${id}`;
+  byId('diff-content').textContent = '正在读取差异…';
+  byId('diff-dialog').showModal();
+  try {
+    const detail = await request(`/ui/calls/${id}`);
+    if (sequence !== diffRequest || !byId('diff-dialog').open) return;
+    diffDetail = detail;
+    byId('diff-meta').textContent = `#${id} · ${detail.call.model} · ${detail.call.result} ${detail.call.status}`;
+    renderDiff(detail.diff);
+    byId('copy-diff').disabled = false;
+  } catch (error) {
+    if (sequence === diffRequest && byId('diff-dialog').open) byId('diff-content').textContent = error.message;
+  }
+}
+
+byId('close-diff').addEventListener('click', () => byId('diff-dialog').close());
+byId('diff-dialog').addEventListener('close', () => ++diffRequest);
+byId('copy-diff').addEventListener('click', () => diffDetail && copy(JSON.stringify(diffDetail, null, 2)));
 
 async function refresh() {
   try {

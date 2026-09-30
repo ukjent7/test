@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 from playwright.sync_api import sync_playwright, expect
+from e2e import EVENTS, decode_sse, frame
 
 
 def free_port():
@@ -40,9 +41,16 @@ def run(binary, output):
                        "content": [{"type": "thinking", "thinking": "fixture reasoning"},
                                    {"type": "text", "text": "已连接"}],
                        "usage": {"input_tokens": 8, "output_tokens": 4}}
-            wire = json.dumps(message).encode()
+            if body["model"] == "diff-json":
+                message["content"] = [
+                    {"type": "thinking", "thinking": None, "signature": None},
+                    {"type": "thinking", "thinking": "PRIVATE_RESPONSE_REASONING", "signature": "KEEP_SIGNATURE"},
+                    {"type": "text", "text": "PRIVATE_RESPONSE_BODY"},
+                ]
+            streaming = body.get("stream", False)
+            wire = b"".join(frame(event) for event in EVENTS) if streaming else json.dumps(message).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
             self.send_header("Content-Length", str(len(wire)))
             self.end_headers()
             self.wfile.write(wire)
@@ -192,6 +200,119 @@ def run(binary, output):
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.screenshot(path=str(output / "gateway-narrow.png"))
         passed("theme-persistence-and-small-window")
+        page.set_viewport_size({"width": 760, "height": 760})
+        page.get_by_role("tab", name="活动", exact=True).click()
+
+        def latest_detail():
+            calls = context.request.get(address + "/ui/status").json()["calls"]
+            assert all("diff" not in call for call in calls), "polling must not download diff bodies"
+            return context.request.get(address + f"/ui/calls/{calls[0]['id']}").json()
+
+        def open_diff(detail):
+            name = f"查看差异 #{detail['call']['id']}"
+            expect(page.get_by_role("button", name=name, exact=True)).to_be_visible()
+            page.get_by_role("button", name=name, exact=True).click()
+            expect(page.get_by_test_id("diff-request")).to_be_visible()
+            expect(page.get_by_test_id("diff-response")).to_be_visible()
+
+        # No response repair and disabled forwarding must not invent changes.
+        disabled_call = next(call for call in context.request.get(address + "/ui/status").json()["calls"]
+                             if call["status"] == 503)
+        disabled_diff = context.request.get(address + f"/ui/calls/{disabled_call['id']}").json()
+        assert disabled_diff["diff"] == {"request": [], "response": []}
+        assert context.request.get(address + "/ui/calls/99999").status == 404
+        assert context.request.get(address + "/ui/calls/1", headers={"Origin": "https://evil.example"}).status == 403
+        open_diff(disabled_diff)
+        expect(page.get_by_test_id("diff-request")).to_have_text("请求 · Grok Build → 上游未记录内容修改")
+        expect(page.get_by_test_id("diff-response")).to_have_text("响应 · 上游 → Grok Build未记录内容修改")
+        page.keyboard.press("Escape")
+        passed("diff-empty-expired-and-local-only")
+
+        attack = '<img src=x onerror="window.DIFF_XSS=true">思考文本'
+        diff_body = {"model": "diff-json", "max_tokens": 64, "stream": False, "messages": [
+            {"role": "user", "content": "PRIVATE_USER_MESSAGE"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": ""}]},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "", "signature": ""},
+                {"type": "thinking", "thinking": attack, "signature": "", "cache_control": {"type": "ephemeral"}},
+                {"type": "thinking", "thinking": "PRIVATE_SIGNED_HISTORY", "signature": "KEEP_SIGNATURE"},
+                {"type": "tool_use", "id": "tool-1", "name": "read_file", "input": {"path": "README.md"}},
+            ]},
+        ]}
+        response = context.request.post(address + "/v1/messages", data=diff_body,
+                                        headers={"Authorization": "Bearer PRIVATE_API_KEY"})
+        assert response.status == 200
+        forwarded = upstream_calls[-1]["body"]
+        assert len(forwarded["messages"]) == 2
+        assert forwarded["messages"][1]["content"] == [
+            {"type": "text", "text": attack, "cache_control": {"type": "ephemeral"}},
+            *diff_body["messages"][2]["content"][2:],
+        ]
+        assert response.json()["content"][0] == {"type": "thinking", "thinking": "", "signature": ""}
+        detail = latest_detail()
+        request_diff, response_diff = detail["diff"]["request"], detail["diff"]["response"]
+        assert len(request_diff) == 3 and len(response_diff) == 1
+        assert request_diff[0]["path"] == "/messages/1" and "after" not in request_diff[0]
+        assert request_diff[1]["path"] == "/messages/2/content/0" and "after" not in request_diff[1]
+        assert request_diff[2]["path"] == "/messages/2/content/1"
+        assert request_diff[2]["after_path"] == "/messages/1/content/0"
+        assert request_diff[2]["after"] == {"type": "text", "text": attack}
+        assert response_diff[0]["path"] == "/content/0"
+        assert response_diff[0]["before"] == {"thinking": None, "signature": None}
+        assert response_diff[0]["after"] == {"thinking": "", "signature": ""}
+        for private in ("PRIVATE_USER_MESSAGE", "PRIVATE_API_KEY", "PRIVATE_SIGNED_HISTORY", "KEEP_SIGNATURE",
+                        "PRIVATE_RESPONSE_REASONING", "PRIVATE_RESPONSE_BODY", "cache_control"):
+            assert private not in json.dumps(detail)
+        open_diff(detail)
+        expect(page.get_by_test_id("diff-request")).to_contain_text(attack)
+        expect(page.get_by_test_id("diff-request")).to_contain_text("/messages/2/content/1 → /messages/1/content/0")
+        expect(page.get_by_test_id("diff-response")).to_contain_text("− signature: null")
+        expect(page.get_by_test_id("diff-response")).to_contain_text('+ signature: ""')
+        assert page.evaluate("window.DIFF_XSS === undefined")
+        assert page.locator("#diff-content img").count() == 0
+        page.wait_for_timeout(1200)  # Status polling must preserve the inspected request.
+        expect(page.get_by_role("dialog", name="请求 / 响应差异")).to_be_visible()
+        expect(page.get_by_test_id("diff-request")).to_contain_text(attack)
+        page.get_by_role("button", name="复制差异", exact=True).click()
+        assert json.loads(page.evaluate("navigator.clipboard.readText()")) == detail
+        page.screenshot(path=str(output / "diff-json-light.png"))
+        page.keyboard.press("Escape")
+        passed("diff-json-request-response-and-literal-content")
+        (output / "diff-json.json").write_text(json.dumps({"request": diff_body, "forwarded": forwarded,
+              "response": response.json(), "detail": detail}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        streaming_body = {**request_body, "model": "diff-stream", "stream": True}
+        response = context.request.post(address + "/v1/messages", data=streaming_body)
+        assert response.status == 200
+        events = decode_sse(response.body())
+        assert events[1]["content_block"]["signature"] == ""
+        assert events[6]["content_block"]["thinking"] == ""
+        detail = latest_detail()
+        assert detail["diff"]["request"] == []
+        changes = detail["diff"]["response"]
+        assert len(changes) == 2 and detail["call"]["repairs"] == 2
+        assert changes[0]["event"] == "SSE #2 · content_block_start · index 0"
+        assert changes[0]["before"] == {} and changes[0]["after"] == {"signature": ""}
+        assert changes[1]["event"] == "SSE #7 · content_block_start · index 1"
+        assert changes[1]["before"] == {"signature": None}
+        assert changes[1]["after"] == {"signature": "", "thinking": ""}
+        open_diff(detail)
+        expect(page.get_by_test_id("diff-response")).to_contain_text("（字段不存在）")
+        expect(page.get_by_test_id("diff-response")).to_contain_text("index 0")
+        expect(page.get_by_test_id("diff-response")).to_contain_text("index 1")
+        page.keyboard.press("Escape")
+        # Repeat opening another record; then capture dark and narrow diff views.
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        open_diff(detail)
+        expect(page.get_by_role("status")).not_to_be_visible()
+        page.screenshot(path=str(output / "diff-sse-dark.png"))
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.querySelector('#diff-dialog').scrollWidth <= document.querySelector('#diff-dialog').clientWidth")
+        page.screenshot(path=str(output / "diff-sse-narrow.png"))
+        (output / "diff-sse.json").write_text(json.dumps({"events": events, "detail": detail},
+              ensure_ascii=False, indent=2), encoding="utf-8")
+        page.keyboard.press("Escape")
+        passed("diff-sse-event-index-and-theme")
         context.tracing.stop(path=str(output / "gui-trace.zip"))
         tracing = False
         browser.close()
@@ -205,6 +326,7 @@ def run(binary, output):
         with urllib.request.urlopen(address + "/ui/status") as response:
             restarted = json.load(response)
         assert restarted["upstream_base_url"] == upstream_url
+        assert restarted["calls"] == [], "diff history must stay in memory only"
         passed("restart-loads-settings")
         report["status"] = "passed"
     except BaseException as error:

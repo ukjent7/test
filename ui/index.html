@@ -65,12 +65,20 @@
       <div class="list activity-list" data-testid="activity-list" id="activity-list">
         <div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从 Grok Build 发送一条消息，它会出现在这里。</p></div>
       </div>
-      <p class="privacy-note">仅记录模型、状态、耗时和修补数量。</p>
+      <p class="privacy-note">差异可能包含被修改的思考文本，仅保留在内存；不记录请求头或未修改的正文。</p>
     </section>
   </main>
 
-  <footer><span class="footer-dot" id="footer-dot"></span><span id="connection">正在连接网关</span><span class="grow"></span><span id="version">v0.2.0</span></footer>
+  <footer><span class="footer-dot" id="footer-dot"></span><span id="connection">正在连接网关</span><span class="grow"></span><span id="version">v0.3.0</span></footer>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="diff-dialog" aria-labelledby="diff-title">
+    <div class="dialog-heading"><h2 id="diff-title">请求 / 响应差异</h2><button type="button" class="icon" id="close-diff" aria-label="关闭差异">×</button></div>
+    <p class="dialog-description" id="diff-meta"></p>
+    <div class="diff-legend"><span class="removed">− 修改前</span><span class="added">+ 修改后</span><span>仅显示被修改的内容</span></div>
+    <div id="diff-content" data-testid="diff-content"></div>
+    <div class="dialog-actions"><button type="button" class="pill" id="copy-diff" disabled>复制差异</button></div>
+  </dialog>
 
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">

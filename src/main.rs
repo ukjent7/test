@@ -15,7 +15,7 @@ use axum::{
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use app::{Gateway, Trace};
+use app::{Change, Gateway, Trace};
 
 struct ApiError(StatusCode, String);
 
@@ -82,7 +82,7 @@ async fn messages(
             "网关转发已停止".into(),
         ));
     };
-    normalize_history(&mut request);
+    trace.diff.request = normalize_history(&mut request);
     strip_hop_headers(&mut headers);
     headers.remove(header::HOST);
     headers.remove(header::CONTENT_LENGTH);
@@ -119,6 +119,7 @@ async fn messages(
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
             let mut line_length = 0;
+            let mut frame_number = 0;
             while let Some(chunk) = upstream.next().await {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
@@ -139,16 +140,19 @@ async fn messages(
                         line_length += 1;
                     }
                     if blank {
-                        let (output, repairs) = normalize_sse(&frame);
-                        trace.repairs += repairs;
+                        frame_number += 1;
+                        let (output, changes) = normalize_sse(&frame, frame_number);
+                        trace.repairs += changes.len();
+                        trace.diff.response.extend(changes);
                         yield Ok(Bytes::from(output));
                         frame.clear();
                     }
                 }
             }
             if !frame.is_empty() {
-                let (output, repairs) = normalize_sse(&frame);
-                trace.repairs += repairs;
+                let (output, changes) = normalize_sse(&frame, frame_number + 1);
+                trace.repairs += changes.len();
+                trace.diff.response.extend(changes);
                 yield Ok(Bytes::from(output));
             }
             trace.result = "完成";
@@ -161,7 +165,8 @@ async fn messages(
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
         let mut value: Value = serde_json::from_slice(&bytes)
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.to_string()))?;
-        trace.repairs = normalize_response(&mut value);
+        trace.diff.response = normalize_response(&mut value);
+        trace.repairs = trace.diff.response.len();
         trace.result = "完成";
         if trace.repairs > 0 {
             Body::from(serde_json::to_vec(&value).unwrap())
@@ -199,28 +204,65 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
     }
 }
 
-fn normalize_history(request: &mut Value) {
+fn unsigned_thinking(block: &Value) -> bool {
+    block["type"] == "thinking"
+        && block["signature"]
+            .as_str()
+            .is_none_or(|value| value.trim().is_empty())
+}
+
+fn normalize_history(request: &mut Value) -> Vec<Change> {
+    let mut changes = Vec::new();
     let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) else {
-        return;
+        return changes;
     };
+    let mut source_message = 0;
+    let mut target_message = 0;
     messages.retain_mut(|message| {
+        let path = format!("/messages/{source_message}");
+        source_message += 1;
         if message["role"] != "assistant" {
+            target_message += 1;
             return true;
         }
-        let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) else {
+        let Some(blocks) = message["content"].as_array() else {
+            target_message += 1;
             return true;
         };
+        if blocks.iter().all(|block| {
+            unsigned_thinking(block)
+                && block["thinking"].as_str().unwrap_or("").trim().is_empty()
+        }) {
+            changes.push(Change::new(
+                path,
+                Some(message.clone()),
+                None,
+                "移除空助手消息",
+            ));
+            return false;
+        }
+        let target_path = format!("/messages/{target_message}");
+        target_message += 1;
+        let blocks = message["content"].as_array_mut().unwrap();
+        let mut source_block = 0;
+        let mut target_block = 0;
         // pi: unsigned thinking is plain text on replay; valid signatures remain opaque.
         blocks.retain_mut(|block| {
-            if block["type"] != "thinking"
-                || block["signature"]
-                    .as_str()
-                    .is_some_and(|value| !value.trim().is_empty())
-            {
+            let block_path = format!("{path}/content/{source_block}");
+            source_block += 1;
+            if !unsigned_thinking(block) {
+                target_block += 1;
                 return true;
             }
+            let before = block.clone();
             let text = block["thinking"].as_str().unwrap_or("").to_owned();
             if text.trim().is_empty() {
+                changes.push(Change::new(
+                    block_path,
+                    Some(before),
+                    None,
+                    "移除空思考块",
+                ));
                 return false;
             }
             let object = block.as_object_mut().unwrap();
@@ -228,48 +270,80 @@ fn normalize_history(request: &mut Value) {
             object.insert("text".into(), json!(text));
             object.remove("thinking");
             object.remove("signature");
+            let mut change = Change::new(
+                block_path,
+                Some(before),
+                Some(block.clone()),
+                "无签名思考内容转为文本",
+            );
+            change.after_path = format!("{target_path}/content/{target_block}");
+            changes.push(change);
+            target_block += 1;
             true
         });
-        !blocks.is_empty()
+        true
     });
+    changes
 }
 
-fn normalize_response(value: &mut Value) -> usize {
-    let mut repairs = 0;
-    let blocks: &mut [Value] = match value["type"].as_str() {
-        Some("content_block_start") => value
-            .get_mut("content_block")
-            .map(std::slice::from_mut)
-            .unwrap_or(&mut []),
-        Some("message_start") => value["message"]["content"]
-            .as_array_mut()
-            .map(Vec::as_mut_slice)
-            .unwrap_or(&mut []),
-        Some("message") => value["content"]
-            .as_array_mut()
-            .map(Vec::as_mut_slice)
-            .unwrap_or(&mut []),
-        _ => return 0,
+fn normalize_response(value: &mut Value) -> Vec<Change> {
+    let mut changes = Vec::new();
+    let (blocks, prefix): (&mut [Value], &str) = match value["type"].as_str() {
+        Some("content_block_start") => (
+            value
+                .get_mut("content_block")
+                .map(std::slice::from_mut)
+                .unwrap_or(&mut []),
+            "/content_block",
+        ),
+        Some("message_start") => (
+            value["message"]["content"]
+                .as_array_mut()
+                .map(Vec::as_mut_slice)
+                .unwrap_or(&mut []),
+            "/message/content",
+        ),
+        Some("message") => (
+            value["content"]
+                .as_array_mut()
+                .map(Vec::as_mut_slice)
+                .unwrap_or(&mut []),
+            "/content",
+        ),
+        _ => return changes,
     };
-    for block in blocks {
+    for (index, block) in blocks.iter_mut().enumerate() {
         if block["type"] != "thinking" {
             continue;
         }
         let mut changed = false;
+        let before = block.clone();
         for field in ["thinking", "signature"] {
             if block.get(field).is_none_or(Value::is_null) {
                 block[field] = json!("");
                 changed = true;
             }
         }
-        repairs += usize::from(changed);
+        if changed {
+            let path = if prefix == "/content_block" {
+                prefix.into()
+            } else {
+                format!("{prefix}/{index}")
+            };
+            changes.push(Change::new(
+                path,
+                Some(before),
+                Some(block.clone()),
+                "补齐思考字段",
+            ));
+        }
     }
-    repairs
+    changes
 }
 
-fn normalize_sse(frame: &[u8]) -> (Vec<u8>, usize) {
+fn normalize_sse(frame: &[u8], frame_number: usize) -> (Vec<u8>, Vec<Change>) {
     let Ok(text) = std::str::from_utf8(frame) else {
-        return (frame.to_vec(), 0);
+        return (frame.to_vec(), Vec::new());
     };
     let data = text
         .lines()
@@ -280,11 +354,18 @@ fn normalize_sse(frame: &[u8]) -> (Vec<u8>, usize) {
         .collect::<Vec<_>>()
         .join("\n");
     let Ok(mut value) = serde_json::from_str::<Value>(&data) else {
-        return (frame.to_vec(), 0);
+        return (frame.to_vec(), Vec::new());
     };
-    let repairs = normalize_response(&mut value);
-    if repairs == 0 {
-        return (frame.to_vec(), 0);
+    let mut changes = normalize_response(&mut value);
+    if changes.is_empty() {
+        return (frame.to_vec(), changes);
+    }
+    let mut event = format!("SSE #{frame_number} · {}", value["type"].as_str().unwrap_or(""));
+    if let Some(index) = value["index"].as_u64() {
+        event.push_str(&format!(" · index {index}"));
+    }
+    for change in &mut changes {
+        change.event = Some(event.clone());
     }
     let mut output = String::new();
     let mut replaced = false;
@@ -304,5 +385,5 @@ fn normalize_sse(frame: &[u8]) -> (Vec<u8>, usize) {
             output.push_str(line);
         }
     }
-    (output.into_bytes(), repairs)
+    (output.into_bytes(), changes)
 }

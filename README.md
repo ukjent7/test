@@ -10,9 +10,12 @@ Rust 编写的 Messages 网关。第二版提供桌面 GUI，界面借鉴本地 
 - 编辑上游地址，立即用于新请求，并保存供下次启动使用。
 - 复制 Grok Build 接入地址或配置片段。
 - 查看本次运行请求数、修补数量、错误及最近 30 条请求。
+- 在活动记录中点击「查看差异」，分别查看请求和响应被修改的内容，红色表示修改前，绿色表示修改后；支持复制差异。
 - 切换并记住深浅主题。
 
-活动记录只存在于内存中，包含模型、HTTP 状态、耗时和修补数量，不保存密钥或消息正文。
+活动记录只存在于内存中，包含模型、HTTP 状态、耗时、修补数量和被修改的区块。差异可能包含无签名思考文本，不记录请求头、API key 或未修改的正文；最多保留最近 30 条，退出后清空。每秒状态轮询只传输摘要，点击记录时才读取差异。
+
+请求差异展示无签名 thinking 转成 text、空思考块或空助手消息的删除；数组删除后同时展示原始和转发位置。响应差异展示补齐的 thinking/signature，区分「字段不存在」、`null` 和 `""`；SSE 标记帧编号、事件类型与 content block index。已有签名、工具调用等未修改内容不会被误报。此视图比较 JSON 内容，不展示空白、键顺序或 HTTP 传输头的变化。
 
 设置保存在系统用户配置目录的 `MessagesGateway/settings.json`，Windows 为 `%APPDATA%\MessagesGateway\settings.json`。`GATEWAY_CONFIG` 可指定文件；`GATEWAY_UPSTREAM_BASE_URL` 在每次启动时覆盖文件中的上游地址。设置写入成功后才更新界面和实际转发地址。GUI 管理接口只接受本机与同源请求。
 
@@ -85,7 +88,7 @@ CI 不修改源文件、不执行 cargo update，始终用已提交的锁文件�
 场景详见 [tests/FAILURE_MODES.md](tests/FAILURE_MODES.md)。成功运行提供两类 Actions 产物：
 
 - `messages-gateway-*`：对应操作系统的可执行文件。
-- `e2e-*`：协议请求/响应、Grok 解析结果，以及 GUI 的浅色/深色/窄窗口截图、交互 trace、状态快照、汇总 `report.json`、工具链版本、依赖锁文件和 `sha256.json`。Windows GUI 测试操作真正的桌面 WebView2；Linux 测试同时验证原生窗口启动与相同页面的控件。失败时也保存已有证据。
+- `e2e-*`：协议请求/响应、Grok 解析结果，以及 GUI 与 diff 的浅色/深色/窄窗口截图、JSON/SSE 差异快照、交互 trace、状态快照、汇总 `report.json`、工具链版本、依赖锁文件和 `sha256.json`。Windows GUI 测试操作真正的桌面 WebView2；Linux 测试同时验证原生窗口启动与相同页面的控件。失败时也保存已有证据。
 
 在有 Rust 的环境中重复 CI：
 
