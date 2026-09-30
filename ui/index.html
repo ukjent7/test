@@ -31,7 +31,8 @@
           <button class="switch" role="switch" aria-label="网关转发" aria-checked="false" id="enabled" disabled><span></span></button>
         </div>
         <div class="row"><span class="row-label">本地地址</span><code class="value" id="local-address">—</code><span class="tag">HTTP</span></div>
-        <div class="row"><span class="row-label">上游服务</span><code class="value" data-testid="upstream" id="upstream">—</code><button class="pill" id="edit-upstream" aria-label="编辑上游">编辑</button></div>
+        <div class="row"><span class="row-label">StepFun</span><code class="value" data-testid="upstream" id="upstream">—</code><button class="pill" id="edit-upstream" aria-label="编辑上游">编辑</button></div>
+        <div class="row"><span class="row-label">OpenCode</span><code class="value" data-testid="opencode-upstream" id="opencode-upstream">—</code><span class="tag">Zen</span></div>
       </div>
 
       <div class="metrics" aria-label="本次运行统计">
@@ -58,6 +59,13 @@
 
       <div class="section-head"><h2>兼容处理</h2></div>
       <div class="list compatibility"><span class="check" aria-hidden="true">✓</span><div><strong>思考内容兼容</strong><p>自动补齐缺失字段，保留已有签名、工具调用与流式输出。</p></div><span class="tag success">已启用</span></div>
+      <div class="section-head"><h2>可用模型</h2><button class="pill" id="fetch-models">拉取模型</button></div>
+      <div class="list model-list">
+        <select id="model-select" aria-label="可用模型" disabled><option>先拉取模型列表</option></select>
+        <button class="pill" id="copy-model" disabled>复制模型 ID</button>
+      </div>
+      <p class="hint">模型前缀自动选择上游；客户端需使用对应的 Messages、Chat Completions 或 Responses 协议。</p>
+      <p class="field-error" id="model-error" role="alert" hidden></p>
     </section>
 
     <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
@@ -84,13 +92,15 @@
     <form id="settings-form">
       <div class="dialog-heading"><h2 id="settings-title">上游服务</h2><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
       <p class="dialog-description">设置提供 Messages 服务的上游地址。</p>
-      <div class="upstream-presets" aria-label="上游预设">
-        <button type="button" class="pill" data-upstream="https://api.stepfun.ai/step_plan/v1">StepFun</button>
-        <button type="button" class="pill" data-upstream="https://opencode.ai/zen/v1">OpenCode Zen</button>
-      </div>
-      <label for="upstream-input">上游基地址</label>
+      <label for="upstream-input">StepFun 上游基地址</label>
       <input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1">
-      <p class="hint">选择预设或填写基地址，保存后立即用于新请求。Zen 自动处理客户端身份与请求头；请使用对应上游的模型和密钥。</p>
+      <label for="stepfun-key">StepFun API key</label>
+      <input type="password" id="stepfun-key" autocomplete="new-password">
+      <label for="opencode-input">OpenCode Zen 上游基地址</label>
+      <input type="url" id="opencode-input" required spellcheck="false" autocomplete="off" placeholder="https://opencode.ai/zen/v1">
+      <label for="opencode-key">OpenCode Zen API key</label>
+      <input type="password" id="opencode-key" autocomplete="new-password">
+      <p class="hint">密钥留空保留已保存值，匿名 Zen 可填 public。配置密钥后客户端无需提供密钥；保存后用于新请求。</p>
       <p class="field-error" data-testid="settings-error" id="settings-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="pill" id="cancel-settings">取消</button><button type="submit" class="primary" id="save-settings">保存</button></div>
     </form>

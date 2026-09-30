@@ -146,6 +146,8 @@ async function refresh() {
     byId('endpoint').textContent = current.endpoint;
     byId('upstream').textContent = current.upstream_base_url;
     byId('upstream').title = current.upstream_base_url;
+    byId('opencode-upstream').textContent = current.opencode_base_url;
+    byId('opencode-upstream').title = current.opencode_base_url;
     byId('config-example').textContent = `base_url = "${current.endpoint}"\napi_backend = "messages"`;
     for (const field of ['requests', 'active', 'repairs', 'errors']) byId(field).textContent = current.stats[field];
     byId('version').textContent = `v${current.version}`;
@@ -181,23 +183,26 @@ byId('copy-config').addEventListener('click', () => copy(byId('config-example').
 byId('edit-upstream').addEventListener('click', () => {
   if (!current) return;
   byId('upstream-input').value = current.upstream_base_url;
+  byId('opencode-input').value = current.opencode_base_url;
+  for (const [id, configured] of [['stepfun-key', current.stepfun_key_configured], ['opencode-key', current.opencode_key_configured]]) {
+    byId(id).value = '';
+    byId(id).placeholder = configured ? '已设置，留空保留' : '未设置';
+  }
   byId('settings-error').hidden = true;
   dialog.showModal();
 });
 byId('close-settings').addEventListener('click', () => dialog.close());
 byId('cancel-settings').addEventListener('click', () => dialog.close());
-for (const preset of document.querySelectorAll('[data-upstream]')) {
-  preset.addEventListener('click', () => {
-    byId('upstream-input').value = preset.dataset.upstream;
-    byId('settings-error').hidden = true;
-  });
-}
 byId('settings-form').addEventListener('submit', async event => {
   event.preventDefault();
   byId('save-settings').disabled = true;
   byId('settings-error').hidden = true;
   try {
-    await request('/ui/settings', {upstream_base_url: byId('upstream-input').value});
+    const settings = {upstream_base_url: byId('upstream-input').value, opencode_base_url: byId('opencode-input').value};
+    for (const [id, key] of [['stepfun-key', 'stepfun_api_key'], ['opencode-key', 'opencode_api_key']]) {
+      if (byId(id).value.trim()) settings[key] = byId(id).value.trim();
+    }
+    await request('/ui/settings', settings);
     await refresh();
     dialog.close();
     notify('上游设置已保存');
@@ -208,6 +213,28 @@ byId('settings-form').addEventListener('submit', async event => {
     byId('save-settings').disabled = false;
   }
 });
+
+byId('fetch-models').addEventListener('click', async () => {
+  byId('fetch-models').disabled = true;
+  byId('model-error').hidden = true;
+  byId('model-select').disabled = true;
+  byId('copy-model').disabled = true;
+  byId('model-select').replaceChildren();
+  try {
+    const result = await request('/v1/models');
+    for (const model of result.data) byId('model-select').add(new Option(model.id, model.id));
+    byId('model-select').disabled = !result.data.length;
+    byId('copy-model').disabled = !result.data.length;
+    if (result.upstream_errors.length) throw new Error(result.upstream_errors.join('；'));
+    notify(`已拉取 ${result.data.length} 个模型`);
+  } catch (error) {
+    byId('model-error').textContent = error.message;
+    byId('model-error').hidden = false;
+  } finally {
+    byId('fetch-models').disabled = false;
+  }
+});
+byId('copy-model').addEventListener('click', () => copy(byId('model-select').value));
 
 toggle.addEventListener('click', async () => {
   if (!current || busy) return;

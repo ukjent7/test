@@ -18,12 +18,22 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ApiError, messages};
+use crate::{ApiError, messages, models};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Settings {
     pub upstream_base_url: String,
+    #[serde(default = "opencode_base_url")]
+    pub opencode_base_url: String,
+    #[serde(default)]
+    pub stepfun_api_key: String,
+    #[serde(default)]
+    pub opencode_api_key: String,
     pub enabled: bool,
+}
+
+fn opencode_base_url() -> String {
+    "https://opencode.ai/zen/v1".into()
 }
 
 #[derive(Default, Serialize)]
@@ -100,6 +110,7 @@ impl Change {
 pub struct Control {
     settings: Settings,
     pub messages_url: reqwest::Url,
+    pub opencode_url: reqwest::Url,
     stats: Stats,
     calls: VecDeque<Call>,
 }
@@ -166,12 +177,26 @@ impl Drop for Trace {
 }
 
 impl Gateway {
-    pub fn forwarding_url(&self) -> Option<reqwest::Url> {
+    pub(crate) fn upstreams(&self, endpoint: &str) -> Result<[(reqwest::Url, String); 2], ApiError> {
         let control = self.control.lock().unwrap();
-        control
-            .settings
-            .enabled
-            .then(|| control.messages_url.clone())
+        if !control.settings.enabled {
+            return Err(ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "网关转发已停止".into(),
+            ));
+        }
+        Ok([
+            (&control.messages_url, &control.settings.stepfun_api_key),
+            (&control.opencode_url, &control.settings.opencode_api_key),
+        ]
+        .map(|(url, key)| {
+            let mut url = url.clone();
+            url.set_path(&format!(
+                "{}/{endpoint}",
+                url.path().trim_end_matches("/messages")
+            ));
+            (url, key.clone())
+        }))
     }
 
     fn save(&self, settings: &Settings) -> Result<(), ApiError> {
@@ -228,6 +253,9 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {
             upstream_base_url: "https://api.stepfun.ai/step_plan/v1".into(),
+            opencode_base_url: opencode_base_url(),
+            stepfun_api_key: String::new(),
+            opencode_api_key: String::new(),
             enabled: true,
         },
         Err(error) => return Err(error.into()),
@@ -235,6 +263,17 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     if let Ok(base) = env::var("GATEWAY_UPSTREAM_BASE_URL") {
         settings.upstream_base_url = base;
     }
+    for (name, value) in [
+        ("GATEWAY_OPENCODE_BASE_URL", &mut settings.opencode_base_url),
+        ("GATEWAY_STEPFUN_API_KEY", &mut settings.stepfun_api_key),
+        ("GATEWAY_OPENCODE_API_KEY", &mut settings.opencode_api_key),
+    ] {
+        if let Ok(overridden) = env::var(name) {
+            *value = overridden;
+        }
+    }
+    let opencode_url = messages_url(&settings.opencode_base_url)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let messages_url = messages_url(&settings.upstream_base_url)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -247,6 +286,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         control: Mutex::new(Control {
             settings,
             messages_url,
+            opencode_url,
             stats: Stats::default(),
             calls: VecDeque::new(),
         }),
@@ -262,6 +302,12 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     let app = Router::new()
         .route("/v1/messages", post(messages))
         .route("/messages", post(messages))
+        .route("/v1/chat/completions", post(messages))
+        .route("/chat/completions", post(messages))
+        .route("/v1/responses", post(messages))
+        .route("/responses", post(messages))
+        .route("/v1/models", get(models))
+        .route("/models", get(models))
         .route("/health", get(|| async { "ok" }))
         .route(
             "/",
@@ -319,6 +365,9 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Json<serde_json::Value> 
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"), "enabled": control.settings.enabled,
         "upstream_base_url": control.settings.upstream_base_url,
+        "opencode_base_url": control.settings.opencode_base_url,
+        "stepfun_key_configured": !control.settings.stepfun_api_key.is_empty(),
+        "opencode_key_configured": !control.settings.opencode_api_key.is_empty(),
         "endpoint": format!("http://{}/v1", gateway.listen),
         "stats": control.stats, "calls": control.calls,
     }))
@@ -340,6 +389,9 @@ async fn call_diff(
 #[derive(Deserialize)]
 struct UpstreamInput {
     upstream_base_url: String,
+    opencode_base_url: Option<String>,
+    stepfun_api_key: Option<String>,
+    opencode_api_key: Option<String>,
 }
 
 async fn update_settings(
@@ -353,13 +405,22 @@ async fn update_settings(
         .to_owned();
     let url = messages_url(&base)?;
     let mut control = gateway.control.lock().unwrap();
-    let settings = Settings {
-        upstream_base_url: base,
-        enabled: control.settings.enabled,
-    };
+    let mut settings = control.settings.clone();
+    settings.upstream_base_url = base;
+    if let Some(base) = input.opencode_base_url {
+        settings.opencode_base_url = base.trim().trim_end_matches('/').to_owned();
+    }
+    let opencode_url = messages_url(&settings.opencode_base_url)?;
+    if let Some(key) = input.stepfun_api_key {
+        settings.stepfun_api_key = key.trim().to_owned();
+    }
+    if let Some(key) = input.opencode_api_key {
+        settings.opencode_api_key = key.trim().to_owned();
+    }
     gateway.save(&settings)?;
     control.settings = settings;
     control.messages_url = url;
+    control.opencode_url = opencode_url;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -373,10 +434,8 @@ async fn set_enabled(
     Json(input): Json<EnabledInput>,
 ) -> Result<StatusCode, ApiError> {
     let mut control = gateway.control.lock().unwrap();
-    let settings = Settings {
-        upstream_base_url: control.settings.upstream_base_url.clone(),
-        enabled: input.enabled,
-    };
+    let mut settings = control.settings.clone();
+    settings.enabled = input.enabled;
     gateway.save(&settings)?;
     control.settings = settings;
     Ok(StatusCode::NO_CONTENT)

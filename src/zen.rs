@@ -4,10 +4,17 @@ use axum::http::{HeaderMap, header};
 use serde_json::Value;
 
 pub fn is_zen(url: &reqwest::Url) -> bool {
-    url.host_str() == Some("opencode.ai") && url.path() == "/zen/v1/messages"
+    url.host_str() == Some("opencode.ai")
+        && matches!(
+            url.path(),
+            "/zen/v1/messages"
+                | "/zen/v1/chat/completions"
+                | "/zen/v1/responses"
+                | "/zen/v1/models"
+        )
 }
 
-pub fn prepare_headers(headers: &mut HeaderMap, request: &Value) {
+pub fn prepare_headers(headers: &mut HeaderMap, request: &Value, anthropic: bool) {
     let session = session_id(headers, request);
     let key = headers.get("x-api-key").cloned().or_else(|| {
         headers
@@ -19,17 +26,26 @@ pub fn prepare_headers(headers: &mut HeaderMap, request: &Value) {
             .ok()
     });
     let mut clean = HeaderMap::new();
-    for name in ["anthropic-version", "anthropic-beta"] {
-        if let Some(value) = headers.get(name) {
-            clean.insert(name, value.clone());
+    if anthropic {
+        for name in ["anthropic-version", "anthropic-beta"] {
+            if let Some(value) = headers.get(name) {
+                clean.insert(name, value.clone());
+            }
         }
+        clean
+            .entry("anthropic-version")
+            .or_insert("2023-06-01".parse().unwrap());
     }
     if let Some(key) = key {
-        clean.insert("x-api-key", key);
+        if anthropic {
+            clean.insert("x-api-key", key);
+        } else {
+            clean.insert(
+                header::AUTHORIZATION,
+                format!("Bearer {}", key.to_str().unwrap()).parse().unwrap(),
+            );
+        }
     }
-    clean
-        .entry("anthropic-version")
-        .or_insert("2023-06-01".parse().unwrap());
     clean.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
     clean.insert(
         header::ACCEPT,
@@ -64,11 +80,13 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
     {
         return signal.to_owned();
     }
-    let first_turn = request["messages"]
-        .as_array()
+    let first_turn = request
+        .get("messages")
+        .or_else(|| request.get("input"))
+        .and_then(Value::as_array)
         .and_then(|messages| messages.iter().find(|message| message["role"] == "user"))
         .map(|message| message["content"].to_string())
-        .unwrap_or_default();
+        .unwrap_or_else(|| request["input"].as_str().unwrap_or("").to_owned());
     // Routing identity only: deterministic within this build, never an auth token.
     let mut hash = DefaultHasher::new();
     headers

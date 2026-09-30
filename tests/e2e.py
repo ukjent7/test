@@ -31,6 +31,7 @@ END = [
      "stop_sequence": None}, "usage": {"output_tokens": 23}},
     {"type": "message_stop"},
 ]
+NATIVE_SSE = b'data: {"delta":"native stream"}\n\ndata: [DONE]\n\n'
 
 
 def delta(index, kind, **fields):
@@ -93,6 +94,7 @@ def run(binary, checker, output):
               "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "grok_decoder_sha256": hashlib.sha256(checker.read_bytes()).hexdigest()}
     captures = {}
+    model_errors = {}
     release = threading.Event()
 
     class Upstream(BaseHTTPRequestHandler):
@@ -101,11 +103,36 @@ def run(binary, checker, output):
         def log_message(self, *_args):
             pass
 
+        def do_GET(self):
+            provider = "opencode" if "/zen/v1/models" in self.path else "stepfun"
+            captures[f"models-{provider}"] = {"path": self.path, "headers": dict(self.headers)}
+            status = model_errors.get(provider, 200)
+            payload = {"object": "list", "data": [{"id": "mimo-v2.5-free" if provider == "opencode" else "step-5-preview",
+                       "object": "model", "created": 7, "owned_by": provider}]}
+            wire = json.dumps(payload if status == 200 else {"error": "fixture"}).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(wire)))
+            self.end_headers()
+            self.wfile.write(wire)
+
         def do_POST(self):
             body = self.rfile.read(int(self.headers["content-length"]))
             case = self.headers.get("x-e2e-case") or json.loads(body)["model"]
             captures[case] = {"path": self.path, "headers": dict(self.headers),
                               "body": json.loads(body)}
+            if self.path.split("?", 1)[0].endswith(("/chat/completions", "/responses")):
+                payload = {"id": "native-e2e", "model": json.loads(body)["model"],
+                           "content": [{"type": "thinking", "thinking": "native passthrough"}],
+                           "choices": [{"message": {"role": "assistant", "content": "hello"}}]}
+                streaming = json.loads(body).get("stream", False)
+                wire = NATIVE_SSE if streaming else json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
+                self.send_header("Content-Length", str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+                return
             if case.startswith(("error-", "zen-error-")) or case == "redirect":
                 status = int(case.rsplit("-", 1)[1]) if case != "redirect" else 307
                 wire = b'{"type":"error","error":{"type":"api_error","message":"fixture"}}'
@@ -180,6 +207,11 @@ def run(binary, checker, output):
            "http_proxy": f"http://127.0.0.1:{upstream.server_port}",
            "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/step_plan/v1/"}
+    for name in ("GATEWAY_OPENCODE_BASE_URL", "GATEWAY_STEPFUN_API_KEY", "GATEWAY_OPENCODE_API_KEY"):
+        env.pop(name, None)
+    # The old schema also proves migration works; previous runs cannot supply stale keys.
+    (output / "settings.json").write_text(json.dumps({"upstream_base_url": env["GATEWAY_UPSTREAM_BASE_URL"],
+                                                    "enabled": True}))
     log = (output / "gateway.log").open("wb")
     process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
 
@@ -191,15 +223,16 @@ def run(binary, checker, output):
         assert expected in result, result
 
     def post(case, payload=None, path="/v1/messages?beta=true", live=False,
-             truncated=False, api_key=False, extra_headers=None):
+             truncated=False, api_key=False, extra_headers=None, no_key=False):
         payload = payload or {"model": "step-5-preview", "max_tokens": 512,
                               "stream": not case.startswith("json"),
                               "messages": [{"role": "user", "content": "你好"}]}
         headers = {"Content-Type": "application/json", "x-e2e-case": case,
                    "anthropic-version": "2023-06-01", "anthropic-beta": "test-beta",
                    "Connection": "keep-alive, x-client-hop", "x-client-hop": "remove-me"}
-        headers.update({"x-api-key": "dummy-api-key"} if api_key
-                       else {"Authorization": "Bearer dummy-token"})
+        if not no_key:
+            headers.update({"x-api-key": "dummy-api-key"} if api_key
+                           else {"Authorization": "Bearer dummy-token"})
         headers.update(extra_headers or {})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         connection.request("POST", path, json.dumps(payload).encode(), headers)
@@ -329,14 +362,14 @@ def run(binary, checker, output):
         passed("sse-invalid")
         post("sse-truncated", truncated=True)
         passed("sse-truncated")
-        for path in ("/v1/responses", "/v1/chat/completions"):
+        for path in ("/v1/unsupported", "/v1/embeddings"):
             assert post(path.rsplit("/", 1)[1], path=path)[0] == 404
             passed(path)
 
-        def set_upstream(base):
+        def set_upstream(base, **settings):
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
             try:
-                connection.request("POST", "/ui/settings", json.dumps({"upstream_base_url": base}),
+                connection.request("POST", "/ui/settings", json.dumps({"upstream_base_url": base, **settings}),
                                    {"Content-Type": "application/json"})
                 response = connection.getresponse()
                 assert response.status == 204, response.read()
@@ -447,6 +480,91 @@ def run(binary, checker, output):
         assert post("json-switch-back", extra_headers={"User-Agent": "original-client"})[0] == 200
         assert captures["json-switch-back"]["headers"]["user-agent"] == "original-client"
         passed("json-switch-back")
+
+        set_upstream(env["GATEWAY_UPSTREAM_BASE_URL"], opencode_base_url="http://opencode.ai/zen/v1",
+                     stepfun_api_key="configured-step-key", opencode_api_key="configured-zen-key")
+
+        def get(path):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                connection.request("GET", path)
+                response = connection.getresponse()
+                return response.status, json.loads(response.read())
+            finally:
+                connection.close()
+
+        status, catalog = get("/v1/models")
+        assert status == 200
+        assert [model["id"] for model in catalog["data"]] == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
+        assert all(model["created"] == 7 for model in catalog["data"])
+        assert catalog["upstream_errors"] == []
+        assert captures["models-stepfun"]["path"] == "/step_plan/v1/models"
+        assert captures["models-opencode"]["path"] == "http://opencode.ai/zen/v1/models"
+        for provider, key in (("stepfun", "configured-step-key"), ("opencode", "configured-zen-key")):
+            forwarded = {k.lower(): v for k, v in captures[f"models-{provider}"]["headers"].items()}
+            assert forwarded["authorization"] == f"Bearer {key}"
+            assert "x-api-key" not in forwarded
+        (output / "models.json").write_text(json.dumps({"catalog": catalog,
+            "upstreams": {k: v for k, v in captures.items() if k.startswith("models-")}}, indent=2))
+        assert get("/models")[1] == catalog
+        passed("prefixed-live-model-catalog-with-configured-keys")
+
+        model_errors["stepfun"] = 401
+        status, partial = get("/v1/models")
+        assert status == 200 and [m["id"] for m in partial["data"]] == ["opencode/mimo-v2.5-free"]
+        assert "stepfun" in partial["upstream_errors"][0] and "401" in partial["upstream_errors"][0]
+        (output / "models-partial.json").write_text(json.dumps(partial, indent=2))
+        passed("models-one-upstream-fails")
+        model_errors["opencode"] = 500
+        assert get("/v1/models")[0] == 502
+        passed("models-both-upstreams-fail")
+        model_errors.clear()
+
+        for provider, case in (("stepfun", "json-stepfun-route"), ("opencode", "zen-json-route")):
+            bare = "step-5-preview" if provider == "stepfun" else case
+            payload = {"model": f"{provider}/{bare}", "max_tokens": 64, "stream": False,
+                       "messages": [{"role": "user", "content": "hello"}]}
+            assert post(case, payload, no_key=True)[0] == 200
+            assert captures[case]["body"]["model"] == bare
+            forwarded = {k.lower(): v for k, v in captures[case]["headers"].items()}
+            assert forwarded["authorization" if provider == "stepfun" else "x-api-key"] == (
+                "Bearer configured-step-key" if provider == "stepfun" else "configured-zen-key")
+            assert captures[case]["path"] == ("/step_plan/v1/messages?beta=true" if provider == "stepfun"
+                                             else "http://opencode.ai/zen/v1/messages?beta=true")
+            passed(case)
+
+        for endpoint in ("chat/completions", "responses"):
+            for streaming in (False, True):
+                case = f"zen-native-{endpoint.replace('/', '-')}-{streaming}"
+                bare = "mimo-v2.5-free" if endpoint == "chat/completions" else "responses-model"
+                payload = {"model": f"opencode/{bare}", "stream": streaming,
+                           "messages": [{"role": "user", "content": "hello"}]} if endpoint == "chat/completions" else {
+                           "model": f"opencode/{bare}", "stream": streaming, "input": "hello"}
+                # Zen removes the case header, so the proxy identifies native fixtures by the bare model.
+                status, _, wire = post(bare, payload, path=f"/v1/{endpoint}?beta=true", no_key=not streaming,
+                                       extra_headers={"User-Agent": "original-client", "Cookie": "must-remove"})
+                assert status == 200
+                forwarded = {k.lower(): v for k, v in captures[bare]["headers"].items()}
+                assert forwarded["authorization"] == "Bearer configured-zen-key"
+                assert "x-api-key" not in forwarded and "cookie" not in forwarded
+                assert "anthropic-version" not in forwarded and "anthropic-beta" not in forwarded
+                assert captures[bare]["body"] == {**payload, "model": bare}
+                assert captures[bare]["path"] == f"http://opencode.ai/zen/v1/{endpoint}?beta=true"
+                if streaming:
+                    assert wire == NATIVE_SSE
+                else:
+                    assert "signature" not in json.loads(wire)["content"][0]
+                (output / f"{case}.response.bin").write_bytes(wire)
+                passed(case)
+
+        _, state = get("/ui/status")
+        assert state["stepfun_key_configured"] and state["opencode_key_configured"]
+        assert "configured-step-key" not in json.dumps(state) and "configured-zen-key" not in json.dumps(state)
+        _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
+        assert any(change["reason"] == "模型前缀路由" for change in detail["diff"]["request"])
+        assert "configured-zen-key" not in json.dumps(detail)
+        (output / "routed-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
+        passed("configured-keys-private-and-routing-visible")
         report["status"] = "passed"
     except BaseException as error:
         report["status"] = "failed"

@@ -28,10 +28,22 @@ def run(binary, output):
               "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "renderer": "native-WebView2" if os.name == "nt" else "Chromium + native-WebKit-smoke"}
     upstream_calls = []
+    model_calls = []
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
+
+        def do_GET(self):
+            provider = "opencode" if "/zen/" in self.path else "stepfun"
+            model_calls.append({"path": self.path, "authorization": self.headers.get("Authorization")})
+            wire = json.dumps({"object": "list", "data": [{"id": "mimo-v2.5-free" if provider == "opencode" else "step-5-preview",
+                               "object": "model"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(wire)))
+            self.end_headers()
+            self.wfile.write(wire)
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["content-length"])))
@@ -60,11 +72,14 @@ def run(binary, output):
     port, debug_port = free_port(), free_port()
     address = f"http://127.0.0.1:{port}"
     settings_path = output.resolve() / "settings.json"
+    settings_path.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "GATEWAY_CONFIG": str(settings_path),
            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*",
            "WEBVIEW2_USER_DATA_FOLDER": str(output.resolve() / "webview-profile")}
     env.pop("GATEWAY_UPSTREAM_BASE_URL", None)
+    for name in ("GATEWAY_OPENCODE_BASE_URL", "GATEWAY_STEPFUN_API_KEY", "GATEWAY_OPENCODE_API_KEY"):
+        env.pop(name, None)
     log = (output / "desktop.log").open("wb")
     process = None
     browser = None
@@ -139,7 +154,7 @@ def run(binary, output):
         assert page.evaluate("navigator.clipboard.readText()") == address + "/v1"
         passed("copy-endpoint")
         page.get_by_role("button", name="编辑上游", exact=True).click()
-        page.get_by_label("上游基地址", exact=True).fill("file:///invalid")
+        page.get_by_label("StepFun 上游基地址", exact=True).fill("file:///invalid")
         page.get_by_role("button", name="保存", exact=True).click()
         expect(page.get_by_test_id("settings-error")).to_be_visible()
         assert not settings_path.exists()
@@ -149,30 +164,47 @@ def run(binary, output):
         passed("keyboard-dismiss")
         original_upstream = context.request.get(address + "/ui/status").json()["upstream_base_url"]
         page.get_by_role("button", name="编辑上游", exact=True).click()
-        page.get_by_role("button", name="OpenCode Zen", exact=True).click()
-        expect(page.get_by_label("上游基地址", exact=True)).to_have_value("https://opencode.ai/zen/v1")
+        expect(page.get_by_label("OpenCode Zen 上游基地址", exact=True)).to_have_value("https://opencode.ai/zen/v1")
+        page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill("https://cancelled.example/v1")
         page.get_by_role("button", name="取消", exact=True).click()
         assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == original_upstream
         assert not settings_path.exists()
-        passed("zen-preset-cancel-keeps-upstream")
-        page.get_by_role("button", name="编辑上游", exact=True).click()
-        page.get_by_role("button", name="StepFun", exact=True).click()
-        expect(page.get_by_label("上游基地址", exact=True)).to_have_value("https://api.stepfun.ai/step_plan/v1")
-        page.get_by_role("button", name="OpenCode Zen", exact=True).click()
-        page.screenshot(path=str(output / "zen-preset.png"))
-        page.get_by_role("button", name="保存", exact=True).click()
-        expect(page.get_by_role("dialog")).not_to_be_visible()
-        expect(page.get_by_test_id("upstream")).to_have_text("https://opencode.ai/zen/v1")
-        assert json.loads(settings_path.read_text())["upstream_base_url"] == "https://opencode.ai/zen/v1"
-        passed("zen-preset-save")
+        passed("cancel-keeps-both-upstreams")
         upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
+        opencode_url = f"http://127.0.0.1:{upstream.server_port}/zen/v1"
         page.get_by_role("button", name="编辑上游", exact=True).click()
-        page.get_by_label("上游基地址", exact=True).fill(upstream_url)
+        page.get_by_label("StepFun 上游基地址", exact=True).fill(upstream_url)
+        page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill(opencode_url)
+        page.get_by_label("StepFun API key", exact=True).fill("GUI_STEP_KEY")
+        page.get_by_label("OpenCode Zen API key", exact=True).fill("GUI_ZEN_KEY")
+        page.screenshot(path=str(output / "dual-upstream-settings.png"))
         page.get_by_role("button", name="保存", exact=True).click()
         expect(page.get_by_role("dialog")).not_to_be_visible()
         expect(page.get_by_test_id("upstream")).to_have_text(upstream_url)
         assert json.loads(settings_path.read_text())["upstream_base_url"] == upstream_url
+        expect(page.get_by_test_id("opencode-upstream")).to_have_text(opencode_url)
         passed("save-upstream")
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        expect(page.get_by_label("StepFun API key", exact=True)).to_have_value("")
+        expect(page.get_by_label("OpenCode Zen API key", exact=True)).to_have_value("")
+        expect(page.get_by_label("StepFun API key", exact=True)).to_have_attribute("placeholder", "已设置，留空保留")
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        saved = json.loads(settings_path.read_text())
+        assert saved["stepfun_api_key"] == "GUI_STEP_KEY" and saved["opencode_api_key"] == "GUI_ZEN_KEY"
+        page.get_by_role("button", name="拉取模型", exact=True).click()
+        expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
+        assert page.locator("#model-select option").all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
+        assert {call["authorization"] for call in model_calls} == {"Bearer GUI_STEP_KEY", "Bearer GUI_ZEN_KEY"}
+        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        page.get_by_role("button", name="复制模型 ID", exact=True).click()
+        expect(page.get_by_role("status")).to_contain_text("已复制")
+        assert page.evaluate("navigator.clipboard.readText()") == "opencode/mimo-v2.5-free"
+        page.screenshot(path=str(output / "prefixed-model-catalog.png"))
+        state = context.request.get(address + "/ui/status").json()
+        assert "GUI_STEP_KEY" not in json.dumps(state) and "GUI_ZEN_KEY" not in json.dumps(state)
+        (output / "models.json").write_text(json.dumps(context.request.get(address + "/v1/models").json(), indent=2))
+        passed("configured-keys-private-model-fetch-and-copy")
         request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
                         "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
         response = context.request.post(address + "/v1/messages", data=request_body,
@@ -345,6 +377,8 @@ def run(binary, output):
         with urllib.request.urlopen(address + "/ui/status") as response:
             restarted = json.load(response)
         assert restarted["upstream_base_url"] == upstream_url
+        assert restarted["opencode_base_url"] == opencode_url
+        assert restarted["stepfun_key_configured"] and restarted["opencode_key_configured"]
         assert restarted["calls"] == [], "diff history must stay in memory only"
         passed("restart-loads-settings")
         report["status"] = "passed"

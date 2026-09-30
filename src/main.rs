@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use app::{Change, Gateway, Trace};
 
-struct ApiError(StatusCode, String);
+pub(crate) struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -76,17 +76,34 @@ async fn messages(
         &gateway,
         request["model"].as_str().unwrap_or("未知模型").to_owned(),
     );
-    let Some(mut url) = gateway.forwarding_url() else {
-        trace.status = 503;
-        return Err(ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "网关转发已停止".into(),
-        ));
+    let endpoint = uri.path().trim_start_matches("/v1").trim_start_matches('/');
+    let [stepfun, opencode] = gateway.upstreams(endpoint).inspect_err(|error| {
+        trace.status = error.0.as_u16();
+    })?;
+    let model = request["model"].as_str().unwrap_or("").to_owned();
+    let (upstream, wire_model) = if let Some(model) = model.strip_prefix("opencode/") {
+        (opencode, model)
+    } else {
+        (stepfun, model.strip_prefix("stepfun/").unwrap_or(&model))
     };
-    trace.diff.request = normalize_history(&mut request);
+    let (mut url, key) = upstream;
+    let anthropic = endpoint == "messages";
+    if anthropic {
+        trace.diff.request = normalize_history(&mut request);
+    }
+    if wire_model != model {
+        trace.diff.request.push(Change::new(
+            String::new(),
+            Some(json!({"model": model})),
+            Some(json!({"model": wire_model})),
+            "模型前缀路由",
+        ));
+        request["model"] = wire_model.into();
+    }
     strip_hop_headers(&mut headers);
+    configured_key(&mut headers, &key)?;
     if zen::is_zen(&url) {
-        zen::prepare_headers(&mut headers, &request);
+        zen::prepare_headers(&mut headers, &request, anthropic);
     }
     headers.remove(header::HOST);
     headers.remove(header::CONTENT_LENGTH);
@@ -104,8 +121,27 @@ async fn messages(
     trace.status = status.as_u16();
     let mut headers = upstream.headers().clone();
     strip_hop_headers(&mut headers);
-    if !status.is_success() {
-        let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
+    if !status.is_success() || !anthropic {
+        let successful = status.is_success();
+        if successful {
+            trace.result = "取消";
+        }
+        let stream = async_stream::stream! {
+            let mut trace = trace;
+            let mut stream = upstream.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                if chunk.is_err() {
+                    trace.result = "失败";
+                    yield chunk;
+                    return;
+                }
+                yield chunk;
+            }
+            if successful {
+                trace.result = "完成";
+            }
+        };
+        let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
         *response.headers_mut() = headers;
         return Ok(response);
@@ -182,6 +218,96 @@ async fn messages(
     *response.status_mut() = status;
     *response.headers_mut() = headers;
     Ok(response)
+}
+
+fn configured_key(headers: &mut HeaderMap, key: &str) -> Result<(), ApiError> {
+    if !key.is_empty() {
+        headers.remove("x-api-key");
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {key}").parse().map_err(|_| {
+                ApiError(
+                    StatusCode::BAD_REQUEST,
+                    "上游密钥不能包含非法请求头字符".into(),
+                )
+            })?,
+        );
+    }
+    Ok(())
+}
+
+async fn models(
+    State(gateway): State<Arc<Gateway>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let [stepfun, opencode] = gateway.upstreams("models")?;
+    let (stepfun, opencode) = futures_util::future::join(
+        fetch_models(&gateway.client, stepfun, headers.clone()),
+        fetch_models(&gateway.client, opencode, headers),
+    )
+    .await;
+    let mut data = Vec::new();
+    let mut errors = Vec::new();
+    let mut successes = 0;
+    for (prefix, result) in [("stepfun", stepfun), ("opencode", opencode)] {
+        match result {
+            Ok(models) => {
+                successes += 1;
+                for mut model in models {
+                    if let Some(id) = model["id"].as_str().filter(|id| !id.is_empty()) {
+                        model["id"] = format!("{prefix}/{id}").into();
+                        data.push(model);
+                    }
+                }
+            }
+            Err(error) => errors.push(format!("{prefix}: {}", error.1)),
+        }
+    }
+    if successes == 0 {
+        return Err(ApiError(StatusCode::BAD_GATEWAY, errors.join("；")));
+    }
+    Ok(Json(
+        json!({"object": "list", "data": data, "upstream_errors": errors}),
+    ))
+}
+
+async fn fetch_models(
+    client: &reqwest::Client,
+    (url, key): (reqwest::Url, String),
+    mut headers: HeaderMap,
+) -> Result<Vec<Value>, ApiError> {
+    strip_hop_headers(&mut headers);
+    configured_key(&mut headers, &key)?;
+    if zen::is_zen(&url) {
+        zen::prepare_headers(&mut headers, &Value::Null, false);
+    }
+    headers.remove(header::HOST);
+    headers.remove(header::CONTENT_LENGTH);
+    headers.insert(header::ACCEPT_ENCODING, "identity".parse().unwrap());
+    let response = client
+        .get(url)
+        .headers(headers)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    if !response.status().is_success() {
+        return Err(ApiError(
+            StatusCode::BAD_GATEWAY,
+            format!("模型列表返回 HTTP {}", response.status()),
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    let mut payload: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "模型列表不是有效 JSON".into()))?;
+    payload
+        .get_mut("data")
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .ok_or_else(|| ApiError(StatusCode::BAD_GATEWAY, "模型列表缺少 data 数组".into()))
 }
 
 fn strip_hop_headers(headers: &mut HeaderMap) {
