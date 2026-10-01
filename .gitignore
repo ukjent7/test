@@ -3,3 +3,7 @@
 /tests/grok-wire/vendor/
 /artifacts/
 __pycache__/
+/settings.json
+/settings.tmp
+/requests.sqlite3*
+/webview/
