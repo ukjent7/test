@@ -111,6 +111,7 @@ jobs:
             artifacts/history/
             artifacts/gui/*.png
             artifacts/gui/*.json
+            artifacts/gui/*.sqlite3
             artifacts/gui/*.log
             artifacts/gui/*.txt
             artifacts/gui/*.zip
