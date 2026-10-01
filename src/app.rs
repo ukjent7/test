@@ -1,6 +1,7 @@
 use std::{
-    collections::VecDeque,
-    env, fs, io,
+    env, fs,
+    hash::{BuildHasher, RandomState},
+    io,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -18,7 +19,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ApiError, messages, models};
+use crate::{ApiError, cache, history, messages, models};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Settings {
@@ -46,7 +47,7 @@ pub struct Stats {
 
 #[derive(Serialize)]
 struct Call {
-    id: u64,
+    id: i64,
     model: String,
     status: u16,
     result: &'static str,
@@ -55,6 +56,8 @@ struct Call {
     timestamp: u128,
     request_changes: usize,
     response_changes: usize,
+    routing: Option<cache::Routing>,
+    cache: cache::Usage,
     #[serde(skip_serializing)]
     diff: Diff,
 }
@@ -112,7 +115,9 @@ pub struct Control {
     pub messages_url: reqwest::Url,
     pub opencode_url: reqwest::Url,
     stats: Stats,
-    calls: VecDeque<Call>,
+    history: history::History,
+    next_id: i64,
+    history_error: Option<String>,
 }
 
 pub struct Gateway {
@@ -120,17 +125,21 @@ pub struct Gateway {
     pub control: Mutex<Control>,
     settings_path: PathBuf,
     listen: SocketAddr,
+    routing_hasher: RandomState,
 }
 
 pub struct Trace {
     gateway: Arc<Gateway>,
-    id: u64,
+    id: i64,
     model: String,
     started: Instant,
     pub status: u16,
     pub result: &'static str,
     pub repairs: usize,
     pub diff: Diff,
+    pub routing: Option<cache::Routing>,
+    pub cache: cache::Usage,
+    pub exchange: history::Exchange,
 }
 
 impl Trace {
@@ -138,16 +147,108 @@ impl Trace {
         let mut control = gateway.control.lock().unwrap();
         control.stats.requests += 1;
         control.stats.active += 1;
+        control.next_id += 1;
         Self {
             gateway: gateway.clone(),
-            id: control.stats.requests,
+            id: control.next_id,
             model,
             started: Instant::now(),
             status: 502,
             result: "失败",
             repairs: 0,
             diff: Diff::default(),
+            routing: None,
+            cache: cache::Usage::default(),
+            exchange: history::Exchange::default(),
         }
+    }
+
+    pub fn record_routing(
+        &mut self,
+        source: &'static str,
+        identity: &str,
+        headers: &axum::http::HeaderMap,
+    ) {
+        let key = headers
+            .get("x-api-key")
+            .and_then(|key| key.to_str().ok())
+            .or_else(|| {
+                headers
+                    .get(header::AUTHORIZATION)?
+                    .to_str()
+                    .ok()?
+                    .strip_prefix("Bearer ")
+            });
+        // A random process-local seed prevents guessing identities from public fingerprints.
+        let fingerprint = self.gateway.routing_hasher.hash_one((identity, key));
+        self.routing = Some(cache::Routing {
+            source,
+            fingerprint: format!("{fingerprint:016x}"),
+        });
+    }
+
+    pub fn snapshot(
+        &self,
+        target: String,
+        status: Option<u16>,
+        headers: &axum::http::HeaderMap,
+        body: Vec<u8>,
+        complete: bool,
+    ) -> history::Snapshot {
+        history::Snapshot {
+            target,
+            status,
+            headers: headers
+                .iter()
+                .map(|(name, value)| {
+                    let value = if matches!(
+                        name.as_str(),
+                        "authorization"
+                            | "x-api-key"
+                            | "cookie"
+                            | "set-cookie"
+                            | "proxy-authorization"
+                    ) {
+                        format!(
+                            "[已隐藏 · {:016x}]",
+                            self.gateway.routing_hasher.hash_one(value.as_bytes())
+                        )
+                    } else {
+                        std::str::from_utf8(value.as_bytes()).map_or_else(
+                            |_| {
+                                format!(
+                                    "HEX {}",
+                                    value
+                                        .as_bytes()
+                                        .iter()
+                                        .map(|byte| format!("{byte:02x}"))
+                                        .collect::<String>()
+                                )
+                            },
+                            str::to_owned,
+                        )
+                    };
+                    (name.to_string(), value)
+                })
+                .collect(),
+            body,
+            complete,
+        }
+    }
+
+    pub fn upstream_response(&mut self) -> &mut history::Snapshot {
+        self.exchange
+            .attempts
+            .last_mut()
+            .unwrap()
+            .response
+            .as_mut()
+            .unwrap()
+    }
+
+    pub fn error(&mut self, error: String) {
+        self.result = "失败";
+        self.exchange.error = Some(error);
     }
 }
 
@@ -157,7 +258,7 @@ impl Drop for Trace {
         control.stats.active -= 1;
         control.stats.repairs += self.repairs;
         control.stats.errors += u64::from(self.result == "失败");
-        control.calls.push_front(Call {
+        let call = Call {
             id: self.id,
             model: self.model.clone(),
             status: self.status,
@@ -170,9 +271,20 @@ impl Drop for Trace {
                 .as_millis(),
             request_changes: self.diff.request.len(),
             response_changes: self.diff.response.len(),
+            routing: self.routing.take(),
+            cache: std::mem::take(&mut self.cache),
             diff: std::mem::take(&mut self.diff),
-        });
-        control.calls.truncate(30);
+        };
+        let summary = serde_json::to_value(&call).unwrap();
+        let detail = json!({"call": summary, "diff": call.diff, "exchange": self.exchange});
+        control.history_error = control
+            .history
+            .save(self.id, &summary, &detail)
+            .err()
+            .map(|error| format!("请求 #{} 未能落盘：{error}", self.id));
+        if let Some(error) = &control.history_error {
+            eprintln!("{error}");
+        }
     }
 }
 
@@ -241,17 +353,20 @@ fn messages_url(base: &str) -> Result<reqwest::Url, ApiError> {
     Ok(url)
 }
 
+pub(crate) fn program_directory() -> io::Result<PathBuf> {
+    let mut path = env::current_exe()?;
+    path.pop();
+    Ok(path)
+}
+
 pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std::error::Error>> {
     let listen: SocketAddr = env::var("GATEWAY_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8789".into())
         .parse()?;
+    let directory = program_directory()?;
     let settings_path = env::var_os("GATEWAY_CONFIG")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::config_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("MessagesGateway/settings.json")
-        });
+        .unwrap_or_else(|| directory.join("settings.json"));
     let mut settings = match fs::read(&settings_path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {
@@ -281,6 +396,11 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
     let listen = listener.local_addr()?;
+    let history_path = env::var_os("GATEWAY_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| settings_path.with_file_name("requests.sqlite3"));
+    let history = history::History::open(&history_path)?;
+    let next_id = history.last_id()?;
     let gateway = Arc::new(Gateway {
         client: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -291,10 +411,13 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
             messages_url,
             opencode_url,
             stats: Stats::default(),
-            calls: VecDeque::new(),
+            history,
+            next_id,
+            history_error: None,
         }),
         settings_path,
         listen,
+        routing_hasher: RandomState::new(),
     });
     let ui = Router::new()
         .route("/ui/status", get(status))
@@ -322,6 +445,15 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
                 (
                     [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
                     include_str!("../ui/app.css"),
+                )
+            }),
+        )
+        .route(
+            "/byte-diff.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../ui/byte-diff.js"),
                 )
             }),
         )
@@ -363,30 +495,38 @@ async fn local_control(
     next.run(request).await
 }
 
-async fn status(State(gateway): State<Arc<Gateway>>) -> Json<serde_json::Value> {
+async fn status(State(gateway): State<Arc<Gateway>>) -> Result<Json<Value>, ApiError> {
     let control = gateway.control.lock().unwrap();
-    Json(json!({
+    let calls = control.history.list().map_err(history_error)?;
+    Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"), "enabled": control.settings.enabled,
         "upstream_base_url": control.settings.upstream_base_url,
         "opencode_base_url": control.settings.opencode_base_url,
         "stepfun_key_configured": !control.settings.stepfun_api_key.is_empty(),
         "opencode_key_configured": !control.settings.opencode_api_key.is_empty(),
         "endpoint": format!("http://{}/v1", gateway.listen),
-        "stats": control.stats, "calls": control.calls,
-    }))
+        "stats": control.stats, "calls": calls, "history_error": control.history_error,
+    })))
 }
 
 async fn call_diff(
     State(gateway): State<Arc<Gateway>>,
-    Path(id): Path<u64>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiError> {
     let control = gateway.control.lock().unwrap();
-    let call = control
-        .calls
-        .iter()
-        .find(|call| call.id == id)
+    let detail = control
+        .history
+        .detail(id)
+        .map_err(history_error)?
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into()))?;
-    Ok(Json(json!({"call": call, "diff": call.diff})))
+    Ok(Json(detail))
+}
+
+fn history_error(error: rusqlite::Error) -> ApiError {
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("无法读取请求历史：{error}"),
+    )
 }
 
 #[derive(Deserialize)]

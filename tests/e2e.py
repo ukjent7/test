@@ -33,6 +33,29 @@ END = [
 ]
 NATIVE_SSE = b'data: {"delta":"native stream"}\n\ndata: [DONE]\n\n'
 ZEN_WIRE = (ROOT / "fixtures/zen-chat.sse").read_bytes()
+CACHE_FIXTURES = {
+    "cache-messages-hit": ("messages", {"input_tokens": 100, "cache_read_input_tokens": 700,
+        "cache_creation_input_tokens": 200}, {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": 200}),
+    "cache-messages-zero": ("messages", {"input_tokens": 100, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}, {"input_tokens": 100, "cache_read_tokens": 0, "cache_write_tokens": 0}),
+    "cache-messages-unknown": ("messages", {"input_tokens": 100},
+        {"input_tokens": 100, "cache_read_tokens": None, "cache_write_tokens": None}),
+    "cache-chat-hit": ("chat/completions", {"prompt_tokens": 1000,
+        "prompt_tokens_details": {"cached_tokens": 700, "cache_write_tokens": 200}},
+        {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": 200}),
+    "cache-chat-zero": ("chat/completions", {"prompt_tokens": 1000, "prompt_tokens_details": {"cached_tokens": 0}},
+        {"input_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": None}),
+    "cache-chat-unknown": ("chat/completions", {"prompt_tokens": 1000},
+        {"input_tokens": 1000, "cache_read_tokens": None, "cache_write_tokens": None}),
+    "cache-chat-deepseek": ("chat/completions", {"prompt_tokens": 1000, "prompt_cache_hit_tokens": 700,
+        "prompt_cache_miss_tokens": 300}, {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": None}),
+    "cache-responses-hit": ("responses", {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 700}},
+        {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": None}),
+    "cache-responses-zero": ("responses", {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 0}},
+        {"input_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": None}),
+    "cache-responses-unknown": ("responses", {"input_tokens": 1000},
+        {"input_tokens": 1000, "cache_read_tokens": None, "cache_write_tokens": None}),
+}
 
 
 def delta(index, kind, **fields):
@@ -124,6 +147,42 @@ def run(binary, checker, output):
             captures[case] = {"path": self.path, "headers": dict(self.headers),
                               "body": json.loads(body)}
             attempts.setdefault(case, []).append(captures[case])
+            if case in CACHE_FIXTURES or case in ("cache-chat-live", "cache-messages-delta"):
+                fixture = "cache-chat-hit" if case == "cache-chat-live" else (
+                    "cache-messages-hit" if case == "cache-messages-delta" else case)
+                endpoint, usage, _ = CACHE_FIXTURES[fixture]
+                if endpoint == "messages":
+                    payload = {**MESSAGE, "usage": usage}
+                    events = [{"type": "message_start", "message": payload}, *json.loads(json.dumps(END))]
+                    if case == "cache-messages-delta":
+                        events[1]["usage"].update(input_tokens=50, cache_read_input_tokens=800,
+                                                  cache_creation_input_tokens=200)
+                elif endpoint == "responses":
+                    payload = {"id": "resp_cache", "object": "response", "output": [], "usage": usage}
+                    events = [{"type": "response.created", "response": payload},
+                              {"type": "response.completed", "response": payload}]
+                else:
+                    payload = {"id": "chat_cache", "choices": [], "usage": usage}
+                    events = [{"choices": []}, payload]
+                streaming = json.loads(body).get("stream", False)
+                wire = (b"".join(b"data: " + json.dumps(event, ensure_ascii=False, indent=2).encode().replace(
+                    b"\n", b"\ndata: ") + b"\r\n\r\n" for event in events)
+                    + (b"data: [DONE]\n\n" if endpoint == "chat/completions" else b"")) if streaming else json.dumps(payload).encode()
+                captures[case]["response_hex"] = wire.hex()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
+                self.send_header("Content-Length", str(len(wire)))
+                self.end_headers()
+                if case == "cache-chat-live":
+                    first = wire.index(b"\r\n\r\n") + 4
+                    self.wfile.write(wire[:first])
+                    self.wfile.flush()
+                    assert release.wait(10)
+                    wire = wire[first:]
+                for offset in range(0, len(wire), 7):
+                    self.wfile.write(wire[offset:offset + 7])
+                    self.wfile.flush()
+                return
             if self.path.split("?", 1)[0].endswith(("/chat/completions", "/responses")):
                 request = json.loads(body)
                 if case == "mimo-v2.5-free" or case.startswith("zen-free-"):
@@ -253,7 +312,10 @@ def run(binary, checker, output):
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     port = free_port()
+    database = output.resolve() / "requests.sqlite3"
+    database.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_CONFIG": str(output.resolve() / "settings.json"),
+           "GATEWAY_DB": str(database),
            "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "HTTP_PROXY": f"http://127.0.0.1:{upstream.server_port}",
            "http_proxy": f"http://127.0.0.1:{upstream.server_port}",
@@ -294,7 +356,7 @@ def run(binary, checker, output):
         try:
             if live:
                 started = time.monotonic()
-                while not wire.endswith(b"\n\n"):
+                while not wire.endswith((b"\n\n", b"\r\n\r\n")):
                     wire += response.read(1)
                 report["first_event_seconds"] = time.monotonic() - started
                 assert decode_sse(wire) == ([START] if first_events is None else first_events)
@@ -545,6 +607,81 @@ def run(binary, checker, output):
             finally:
                 connection.close()
 
+        def latest_call(model):
+            for _ in range(100):
+                _, state = get("/ui/status")
+                if state["stats"]["active"] == 0 and state["calls"] and state["calls"][0]["model"] == model:
+                    return state["calls"][0]
+                time.sleep(0.02)
+            raise AssertionError(f"missing completed call: {model}")
+
+        identities = []
+        for index, (endpoint, headers, fields, source, group) in enumerate([
+            ("messages", {"x-grok-conv-id": "PRIVATE_MAIN", "x-grok-session-id": "PRIVATE_PARENT"}, {}, "x-grok-conv-id", "main"),
+            ("messages", {"x-grok-conv-id": "PRIVATE_SIDE", "x-grok-session-id": "PRIVATE_PARENT"}, {}, "x-grok-conv-id", "side"),
+            ("messages", {"x-grok-conv-id": "PRIVATE_MAIN", "x-grok-req-id": "new-request"}, {}, "x-grok-conv-id", "main"),
+            ("responses", {"x-grok-conv-id": "btw-1"}, {"prompt_cache_key": "PRIVATE_MAIN"}, "prompt_cache_key", "main"),
+            ("responses", {"x-grok-conv-id": "btw-2"}, {"prompt_cache_key": "PRIVATE_MAIN"}, "prompt_cache_key", "main"),
+            ("responses", {"x-grok-conv-id": "PRIVATE_SIDE"}, {"prompt_cache_key": ""}, "x-grok-conv-id", "side"),
+            ("chat/completions", {"session-id": "PRIVATE_MAIN"}, {}, "session-id", "main"),
+            ("chat/completions", {"session_id": "PRIVATE_MAIN"}, {}, "session_id", "main"),
+            ("responses", {"x-opencode-session": canonical}, {"prompt_cache_key": "PRIVATE_MAIN"}, "x-opencode-session", "canonical"),
+            ("messages", {"x-session-affinity": "PRIVATE_MAIN", "x-grok-conv-id": "PRIVATE_SIDE"}, {}, "x-session-affinity", "main"),
+            ("messages", {"x-grok-conv-id": "", "session-id": ""}, {"metadata": {"session_id": "PRIVATE_MAIN"}}, "metadata.session_id", "main"),
+        ]):
+            bare = f"zen-json-identity-{index}"
+            payload = {"model": f"opencode/{bare}", "max_tokens": 64, "stream": False, **fields}
+            payload["input" if endpoint == "responses" else "messages"] = (
+                f"changed input {index}" if endpoint == "responses" else
+                [{"role": "user", "content": "same first" if index < 2 else f"compressed {index}"}])
+            assert post(bare, payload, path=f"/v1/{endpoint}", extra_headers=headers, no_key=True)[0] == 200
+            identity = captures[bare]["headers"]["x-opencode-session"]
+            call = latest_call(payload["model"])
+            assert call["routing"]["source"] == source
+            assert re.fullmatch(r"[0-9a-f]{16}", call["routing"]["fingerprint"])
+            identities.append({"group": group, "identity": identity, "call": call})
+            passed(bare)
+        for group in ("main", "side", "canonical"):
+            matching = [item for item in identities if item["group"] == group]
+            assert len({item["identity"] for item in matching}) == 1
+            assert len({item["call"]["routing"]["fingerprint"] for item in matching}) == 1
+        assert identities[0]["identity"] != identities[1]["identity"]
+        assert identities[8]["identity"] == canonical
+        assert all(private not in json.dumps([item["call"] for item in identities])
+                   for private in ("PRIVATE_MAIN", "PRIVATE_SIDE", "PRIVATE_PARENT", "configured-zen-key"))
+        (output / "cache-identities.json").write_text(json.dumps(identities, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        observations = []
+        for bare, (endpoint, _, expected) in CACHE_FIXTURES.items():
+            for streaming in (False, True):
+                payload = {"model": bare, "max_tokens": 64, "stream": streaming,
+                           "input": "PRIVATE_CACHE_INPUT"} if endpoint == "responses" else {
+                           "model": bare, "max_tokens": 64, "stream": streaming,
+                           "messages": [{"role": "user", "content": "PRIVATE_CACHE_INPUT"}]}
+                status, _, wire = post(bare, payload, path=f"/v1/{endpoint}",
+                    extra_headers={"x-grok-conv-id": "PRIVATE_CACHE_SESSION"})
+                assert status == 200 and wire == bytes.fromhex(captures[bare]["response_hex"])
+                call = latest_call(bare)
+                assert call["cache"] == expected, call
+                assert call["routing"]["source"] == "x-grok-conv-id"
+                assert "PRIVATE_CACHE" not in json.dumps(call)
+                observations.append({"model": bare, "stream": streaming, "call": call})
+                (output / f"{bare}-{streaming}.response.bin").write_bytes(wire)
+                passed(f"{bare}-{streaming}")
+        payload = {"model": "cache-messages-delta", "stream": True,
+                   "messages": [{"role": "user", "content": "hi"}]}
+        assert post("cache-messages-delta", payload)[0] == 200
+        assert latest_call(payload["model"])["cache"] == {
+            "input_tokens": 1050, "cache_read_tokens": 800, "cache_write_tokens": 200}
+        passed("cache-messages-delta-replaces-cumulative-usage")
+        release.clear()
+        payload = {"model": "cache-chat-live", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
+        assert post(payload["model"], payload, path="/v1/chat/completions", live=True,
+                    first_events=[{"choices": []}])[0] == 200
+        assert latest_call(payload["model"])["cache"] == CACHE_FIXTURES["cache-chat-hit"][2]
+        passed("cache-native-sse-remains-live")
+        (output / "cache-observations.json").write_text(json.dumps(observations, ensure_ascii=False, indent=2), encoding="utf-8")
+
         status, catalog = get("/v1/models")
         assert status == 200
         assert [model["id"] for model in catalog["data"]] == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
@@ -640,7 +777,15 @@ def run(binary, checker, output):
         _, state = get("/ui/status")
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "Zen 免费层要求流式与基础工具" for change in detail["diff"]["request"])
-        assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail)
+        assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail["diff"])
+        exchange = detail["exchange"]
+        assert len(exchange["attempts"]) == 2
+        assert exchange["attempts"][0]["response"]["status"] == 403
+        assert exchange["attempts"][1]["response"]["status"] == 200
+        assert bytes(exchange["attempts"][1]["response"]["body"]) == ZEN_WIRE
+        assert bytes(exchange["response"]["body"]) == wire
+        assert "PRIVATE_FREE_MESSAGE" in bytes(exchange["request"]["body"]).decode()
+        assert detail["call"]["cache"] == {"input_tokens": 225, "cache_read_tokens": 0, "cache_write_tokens": 0}
         (output / "free-request-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("free-json-collapses-real-mimo-stream")
 
@@ -684,6 +829,7 @@ def run(binary, checker, output):
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "模型前缀路由" for change in detail["diff"]["request"])
         assert "configured-zen-key" not in json.dumps(detail)
+        assert detail["call"]["cache"] == {"input_tokens": None, "cache_read_tokens": None, "cache_write_tokens": None}
         (output / "routed-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("configured-keys-private-and-routing-visible")
         report["status"] = "passed"

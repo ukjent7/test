@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import threading
@@ -27,6 +28,11 @@ def run(binary, output):
     report = {"status": "running", "cases": [], "commit": os.environ.get("GITHUB_SHA"),
               "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "renderer": "native-WebView2" if os.name == "nt" else "Chromium + native-WebKit-smoke"}
+    copied_binary = output.resolve() / binary.name
+    shutil.copy2(binary, copied_binary)
+    binary = copied_binary
+    launch_cwd = output.resolve() / "other-launch-directory"
+    launch_cwd.mkdir(exist_ok=True)
     upstream_calls = []
     model_calls = []
 
@@ -52,13 +58,27 @@ def run(binary, output):
                        "model": body["model"], "stop_reason": "end_turn",
                        "content": [{"type": "thinking", "thinking": "fixture reasoning"},
                                    {"type": "text", "text": "已连接"}],
-                       "usage": {"input_tokens": 8, "output_tokens": 4}}
+                       "usage": {"input_tokens": 100, "output_tokens": 4,
+                                 "cache_read_input_tokens": 700, "cache_creation_input_tokens": 200}}
+            if body["model"] == "cache-unknown":
+                message["usage"] = {"input_tokens": 100}
+            elif body["model"] == "cache-zero":
+                message["usage"] = {"input_tokens": 100, "cache_read_input_tokens": 0,
+                                    "cache_creation_input_tokens": 0}
             if body["model"] == "diff-json":
                 message["content"] = [
                     {"type": "thinking", "thinking": None, "signature": None},
                     {"type": "thinking", "thinking": "PRIVATE_RESPONSE_REASONING", "signature": "KEEP_SIGNATURE"},
                     {"type": "text", "text": "PRIVATE_RESPONSE_BODY"},
                 ]
+            if body["model"] == "history-gui-error":
+                wire = b'{ "error" : "GUI error \\t \\n" } \r\n'
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+                return
             streaming = body.get("stream", False)
             wire = b"".join(frame(event) for event in EVENTS) if streaming else json.dumps(message).encode()
             self.send_response(200)
@@ -73,10 +93,12 @@ def run(binary, output):
     address = f"http://127.0.0.1:{port}"
     settings_path = output.resolve() / "settings.json"
     settings_path.unlink(missing_ok=True)
+    database = output.resolve() / "requests.sqlite3"
+    database.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
-           "GATEWAY_CONFIG": str(settings_path),
-           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*",
-           "WEBVIEW2_USER_DATA_FOLDER": str(output.resolve() / "webview-profile")}
+           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*"}
+    for name in ("GATEWAY_CONFIG", "GATEWAY_DB", "WEBVIEW2_USER_DATA_FOLDER"):
+        env.pop(name, None)
     env.pop("GATEWAY_UPSTREAM_BASE_URL", None)
     for name in ("GATEWAY_OPENCODE_BASE_URL", "GATEWAY_STEPFUN_API_KEY", "GATEWAY_OPENCODE_API_KEY"):
         env.pop(name, None)
@@ -90,7 +112,7 @@ def run(binary, output):
 
     def launch(headless=False):
         return subprocess.Popen([str(binary), *(["--headless"] if headless else [])],
-                                env=env, stdout=log, stderr=log)
+                                env=env, cwd=launch_cwd, stdout=log, stderr=log)
 
     def wait_ready():
         for _ in range(300):
@@ -147,6 +169,11 @@ def run(binary, output):
         expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
         expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
         expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
+        assert (output / "webview").is_dir(), "native WebView must use the program directory"
+        assert not list(launch_cwd.iterdir()), "runtime files must not follow the working directory"
+        (output / "runtime-paths.json").write_text(json.dumps({"program": str(binary), "cwd": str(launch_cwd),
+            "settings": str(settings_path), "database": str(database), "webview": str(output.resolve() / "webview")}, indent=2))
+        passed("portable-default-webview-config-and-database-paths")
         passed("native-window-and-live-state")
         page.get_by_role("button", name="复制地址", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("已复制")
@@ -208,7 +235,7 @@ def run(binary, output):
         request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
                         "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
         response = context.request.post(address + "/v1/messages", data=request_body,
-                                         headers={"Authorization": "Bearer PRIVATE_API_KEY"})
+                                         headers={"Authorization": "Bearer PRIVATE_API_KEY", "x-grok-conv-id": "PRIVATE_GUI_SESSION"})
         assert response.status == 200
         assert response.json()["content"][0]["signature"] == ""
         assert upstream_calls[-1]["path"] == "/step_plan/v1/messages"
@@ -219,6 +246,10 @@ def run(binary, output):
         status = context.request.get(address + "/ui/status").json()
         assert "PRIVATE_USER_MESSAGE" not in json.dumps(status)
         assert "PRIVATE_API_KEY" not in json.dumps(status)
+        assert "PRIVATE_GUI_SESSION" not in json.dumps(status)
+        expect(page.get_by_test_id("cache-usage").first).to_contain_text("缓存命中 70%")
+        expect(page.get_by_test_id("cache-usage").first).to_contain_text("输入 1,000 · 读取 700 · 写入 200")
+        expect(page.get_by_test_id("routing-identity").first).to_contain_text("x-grok-conv-id")
         (output / "request-status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
         page.screenshot(path=str(output / "activity-light.png"))
         passed("real-request-repair-and-private-activity")
@@ -253,6 +284,23 @@ def run(binary, output):
         page.set_viewport_size({"width": 760, "height": 760})
         page.get_by_role("tab", name="活动", exact=True).click()
 
+        for model, label in (("cache-zero", "缓存命中 0%"), ("cache-unknown", "缓存命中未报告")):
+            response = context.request.post(address + "/v1/messages", data={**request_body, "model": model})
+            assert response.status == 200
+            expect(page.get_by_test_id("activity-list")).to_contain_text(model)
+            expect(page.get_by_test_id("cache-usage").first).to_contain_text(label)
+        page.screenshot(path=str(output / "cache-activity-light.png"))
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        page.screenshot(path=str(output / "cache-activity-dark.png"))
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(output / "cache-activity-narrow.png"))
+        page.set_viewport_size({"width": 760, "height": 760})
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        (output / "cache-activity.json").write_text(json.dumps(context.request.get(address + "/ui/status").json(),
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        passed("cache-usage-zero-unknown-routing-and-themes")
+
         def latest_detail():
             calls = context.request.get(address + "/ui/status").json()["calls"]
             assert all("diff" not in call for call in calls), "polling must not download diff bodies"
@@ -273,8 +321,8 @@ def run(binary, output):
         assert context.request.get(address + "/ui/calls/99999").status == 404
         assert context.request.get(address + "/ui/calls/1", headers={"Origin": "https://evil.example"}).status == 403
         open_diff(disabled_diff)
-        expect(page.get_by_test_id("diff-request")).to_have_text("请求 · Grok Build → 上游未记录内容修改")
-        expect(page.get_by_test_id("diff-response")).to_have_text("响应 · 上游 → Grok Build未记录内容修改")
+        expect(page.get_by_test_id("diff-request")).to_have_text("请求 · Grok Build → 上游未记录主动修补；完整字节差异见下方")
+        expect(page.get_by_test_id("diff-response")).to_have_text("响应 · 上游 → Grok Build未记录主动修补；完整字节差异见下方")
         page.keyboard.press("Escape")
         passed("diff-empty-expired-and-local-only")
 
@@ -312,9 +360,12 @@ def run(binary, output):
         assert response_diff[0]["after"] == {"thinking": "", "signature": ""}
         for private in ("PRIVATE_USER_MESSAGE", "PRIVATE_API_KEY", "PRIVATE_SIGNED_HISTORY", "KEEP_SIGNATURE",
                         "PRIVATE_RESPONSE_REASONING", "PRIVATE_RESPONSE_BODY", "cache_control"):
-            assert private not in json.dumps(detail)
+            assert private not in json.dumps(detail["diff"])
+        assert "PRIVATE_USER_MESSAGE" in bytes(detail["exchange"]["request"]["body"]).decode()
+        assert "PRIVATE_RESPONSE_BODY" in bytes(detail["exchange"]["attempts"][0]["response"]["body"]).decode()
+        assert "PRIVATE_API_KEY" not in json.dumps(detail)
         open_diff(detail)
-        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False).replace(" ", "\\u0020"))
         expect(page.get_by_test_id("diff-request")).to_contain_text("/messages/2/content/1 → /messages/1/content/0")
         expect(page.get_by_test_id("diff-response")).to_contain_text("− signature: null")
         expect(page.get_by_test_id("diff-response")).to_contain_text('+ signature: ""')
@@ -322,7 +373,7 @@ def run(binary, output):
         assert page.locator("#diff-content img").count() == 0
         page.wait_for_timeout(1200)  # Status polling must preserve the inspected request.
         expect(page.get_by_role("dialog", name="请求 / 响应差异")).to_be_visible()
-        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False).replace(" ", "\\u0020"))
         page.get_by_role("button", name="复制差异", exact=True).click()
         assert json.loads(page.evaluate("navigator.clipboard.readText()")) == detail
         page.get_by_test_id("diff-response").scroll_into_view_if_needed()
@@ -364,6 +415,44 @@ def run(binary, output):
               ensure_ascii=False, indent=2), encoding="utf-8")
         page.keyboard.press("Escape")
         passed("diff-sse-event-index-and-theme")
+
+        raw_request = '{ \t"model" : "history-gui-whitespace", "stream": false, "messages": [] }\r\n'
+        response = context.request.post(address + "/v1/messages", data=raw_request,
+                                         headers={"Content-Type": "application/json"})
+        assert response.status == 200
+        whitespace_detail = latest_detail()
+        assert bytes(whitespace_detail["exchange"]["request"]["body"]).decode() == raw_request
+        open_diff(whitespace_detail)
+        expect(page.get_by_test_id("wire-request-1")).to_contain_text("\\u0020")
+        expect(page.get_by_test_id("wire-request-1")).to_contain_text("\\t")
+        expect(page.get_by_test_id("wire-request-1")).to_contain_text("\\r\\n")
+        expect(page.get_by_test_id("wire-request-1")).to_contain_text("字节")
+        expect(page.get_by_test_id("wire-response-1")).to_contain_text("字节")
+        page.get_by_test_id("wire-original-request").locator("summary").click()
+        expect(page.get_by_test_id("wire-original-request")).to_contain_text("history-gui-whitespace")
+        page.screenshot(path=str(output / "diff-byte-whitespace-narrow.png"))
+        page.get_by_role("button", name="复制差异", exact=True).click()
+        assert json.loads(page.evaluate("navigator.clipboard.readText()")) == whitespace_detail
+        page.keyboard.press("Escape")
+        page.get_by_label("筛选请求", exact=True).fill(str(whitespace_detail["call"]["id"]))
+        expect(page.locator("#activity-list .call")).to_have_count(1)
+        expect(page.get_by_test_id("activity-list")).to_contain_text("history-gui-whitespace")
+        page.get_by_label("筛选请求", exact=True).fill("")
+        response = context.request.post(address + "/v1/messages", data={"model": "history-gui-error"})
+        assert response.status == 429
+        error_detail = latest_detail()
+        page.get_by_label("仅错误", exact=True).check()
+        expect(page.get_by_test_id("activity-list")).not_to_contain_text("history-gui-whitespace")
+        expect(page.get_by_test_id("activity-list")).to_contain_text("history-gui-error")
+        open_diff(error_detail)
+        page.get_by_test_id("wire-downstream-response").locator("summary").click()
+        expect(page.get_by_test_id("wire-downstream-response")).to_contain_text("GUI\\u0020error")
+        expect(page.get_by_test_id("wire-response-1")).to_contain_text("正文逐字节相同")
+        page.screenshot(path=str(output / "history-error-detail-narrow.png"))
+        page.keyboard.press("Escape")
+        page.get_by_label("仅错误", exact=True).uncheck()
+        retained = context.request.get(address + "/ui/status").json()["calls"]
+        passed("byte-diff-whitespace-full-error-filter-and-copy")
         context.tracing.stop(path=str(output / "gui-trace.zip"))
         tracing = False
         browser.close()
@@ -379,8 +468,10 @@ def run(binary, output):
         assert restarted["upstream_base_url"] == upstream_url
         assert restarted["opencode_base_url"] == opencode_url
         assert restarted["stepfun_key_configured"] and restarted["opencode_key_configured"]
-        assert restarted["calls"] == [], "diff history must stay in memory only"
-        passed("restart-loads-settings")
+        assert restarted["calls"] == retained, "request history must survive restart"
+        with urllib.request.urlopen(address + f"/ui/calls/{error_detail['call']['id']}") as response:
+            assert json.load(response) == error_detail
+        passed("restart-loads-settings-and-complete-request-history")
         report["status"] = "passed"
     except BaseException as error:
         report.update(status="failed", error=repr(error))
@@ -415,7 +506,7 @@ def run(binary, output):
         log.close()
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json"}
+                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json" and path.resolve() != binary}
         (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"GUI E2E passed: {len(report['cases'])} cases; evidence: {output}")
 
