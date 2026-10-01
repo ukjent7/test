@@ -5,6 +5,7 @@ function diffLine(parent, kind, text) {
   line.className = kind;
   line.textContent = text;
   parent.append(line);
+  return line;
 }
 
 const visible = value => JSON.stringify(value).replace(/[\s\u200b-\u200f\u2060-\u206f\ufeff]/gu,
@@ -29,6 +30,112 @@ function rawSnapshot(parent, title, snapshot, testid) {
   parent.append(details);
 }
 
+function diffParts(left, right, deadline = performance.now() + 100, anchors = true) {
+  let start = 0, end = 0;
+  while (start < Math.min(left.length, right.length) && left[start] === right[start]) start++;
+  while (end < Math.min(left.length, right.length) - start && left.at(-end - 1) === right.at(-end - 1)) end++;
+  const a = left.slice(start, left.length - end), b = right.slice(start, right.length - end);
+  let middle = [];
+  if (a.length || b.length) {
+    middle = performance.now() < deadline && ByteDiff.diffArrays(a, b,
+      {timeout: Math.max(0, deadline - performance.now()), maxEditLength: 1000});
+    if (!middle && anchors) {
+      const unique = values => {
+        const positions = new Map();
+        values.forEach((value, index) => positions.set(value, positions.has(value) ? -1 : index));
+        return positions;
+      };
+      const old = unique(a), next = unique(b), pairs = [];
+      for (const [value, index] of old) {
+        if (index >= 0 && next.get(value) >= 0) pairs.push([index, next.get(value)]);
+      }
+      const tails = [], previous = [];
+      pairs.forEach((pair, index) => {
+        let lo = 0, hi = tails.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (pairs[tails[mid]][1] < pair[1]) lo = mid + 1;
+          else hi = mid;
+        }
+        previous[index] = tails[lo - 1] ?? -1;
+        tails[lo] = index;
+      });
+      const matches = [];
+      for (let index = tails.at(-1) ?? -1; index >= 0; index = previous[index]) matches.unshift(pairs[index]);
+      if (matches.length) {
+        middle = [];
+        let oldIndex = 0, newIndex = 0;
+        for (const [oldMatch, newMatch] of [...matches, [a.length, b.length]]) {
+          middle.push(...diffParts(a.slice(oldIndex, oldMatch), b.slice(newIndex, newMatch), deadline, false));
+          if (oldMatch < a.length) middle.push({value: [a[oldMatch]]});
+          oldIndex = oldMatch + 1;
+          newIndex = newMatch + 1;
+        }
+      }
+    }
+    // A bounded comparison still returns a real replacement, retaining every token.
+    if (!middle) middle = [...(a.length ? [{removed: true, value: a}] : []), ...(b.length ? [{added: true, value: b}] : [])];
+  }
+  return [...(start ? [{value: left.slice(0, start)}] : []), ...middle,
+    ...(end ? [{value: left.slice(left.length - end)}] : [])];
+}
+
+function highlightPair(removed, added, before, after) {
+  const words = text => text.match(/[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu) || [];
+  for (const part of diffParts(words(before), words(after))) {
+    const text = part.value.join('');
+    if (!part.added) removed.append(part.removed ? element('mark', '', text) : document.createTextNode(text));
+    if (!part.removed) added.append(part.added ? element('mark', '', text) : document.createTextNode(text));
+  }
+}
+
+function lineDifference(parent, before, after) {
+  const parts = diffParts(before.split('\n'), after.split('\n'));
+  const patch = element('div', 'diff-patch');
+  let oldLine = 1, newLine = 1;
+  function row(kind, text) {
+    const line = element('pre', `diff-row ${kind}`);
+    if (kind !== 'added') line.dataset.oldLine = oldLine;
+    if (kind !== 'removed') line.dataset.newLine = newLine;
+    line.append(element('span', 'diff-number', `${kind === 'removed' ? '−' : kind === 'added' ? '+' : ' '} ${kind === 'added' ? newLine : oldLine}`));
+    const content = element('span', 'diff-code', text);
+    line.append(content);
+    patch.append(line);
+    return content;
+  }
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index], next = parts[index + 1];
+    if (part.removed && part.value.length === 1 && next?.added && next.value.length === 1) {
+      const removed = row('removed');
+      oldLine++;
+      const added = row('added');
+      newLine++;
+      highlightPair(removed, added, part.value[0], next.value[0]);
+      index++;
+    } else if (part.removed || part.added) {
+      for (const text of part.value) {
+        row(part.removed ? 'removed' : 'added', text);
+        if (part.removed) oldLine++;
+        else newLine++;
+      }
+    } else {
+      const leading = index > 0, trailing = index < parts.length - 1;
+      let skipped = 0;
+      for (const [position, text] of part.value.entries()) {
+        if ((leading && position < 4) || (trailing && position >= part.value.length - 4)) {
+          if (skipped) patch.append(element('div', 'diff-gap', `··· ${skipped} 行未变`));
+          skipped = 0;
+          row('diff-context', text);
+        } else skipped++;
+        oldLine++;
+        newLine++;
+      }
+      if (skipped) patch.append(element('div', 'diff-gap', `··· ${skipped} 行未变`));
+    }
+  }
+  parent.append(patch);
+}
+
 function jsonDifference(before, after) {
   let left, right;
   try {
@@ -49,24 +156,40 @@ function jsonDifference(before, after) {
     } else changes.push({path: path || '/', before: a, after: b});
   }
   walk(left, right, '');
-  return changes;
+  const format = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item, 2);
+  return {changes, before: format(left), after: format(right)};
 }
 
 function byteDifference(parent, before, after) {
-  const changes = ByteDiff.diffArrays(before, after, {timeout: 1000});
-  if (!changes) {
-    diffLine(parent, 'diff-empty', '字节差异计算超时。完整数据可在原始/实际正文中展开，或使用“复制差异”导出；上方 JSON 字段差异仍有效。');
-    return;
+  let changes;
+  try {
+    const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+    const tokens = bytes => decoder.decode(new Uint8Array(bytes)).match(/"(?:\\[\s\S]|[^"\\])*"|\s+|[^\s"{}\[\],:]+|[\s\S]/gu) || [];
+    changes = diffParts(tokens(before), tokens(after)).map(part => ({...part, value: Array.from(new TextEncoder().encode(part.value.join('')))}));
+  } catch {
+    changes = diffParts(before, after);
   }
   let oldOffset = 0, newOffset = 0, changed = false;
-  for (const change of changes) {
+  for (let index = 0; index < changes.length; index++) {
+    const change = changes[index];
     if (change.removed || change.added) {
       changed = true;
-      diffLine(parent, change.removed ? 'removed' : 'added',
-        `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.count} 字节: ${byteText(change.value)}`);
+      const line = diffLine(parent, change.removed ? 'removed' : 'added',
+        `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.value.length} 字节: `);
+      const next = changes[index + 1];
+      if (change.removed && next?.added) {
+        const added = diffLine(parent, 'added', `+ 字节 ${newOffset} · ${next.value.length} 字节: `);
+        highlightPair(line, added, byteText(change.value), byteText(next.value));
+        oldOffset += change.value.length;
+        newOffset += next.value.length;
+        index++;
+        continue;
+      }
+      line.append(document.createTextNode(byteText(change.value)));
     }
-    if (!change.added) oldOffset += change.count;
-    if (!change.removed) newOffset += change.count;
+    if (!change.added) oldOffset += change.value.length;
+    if (!change.removed) newOffset += change.value.length;
   }
   if (!changed) diffLine(parent, 'diff-empty', '正文逐字节相同');
 }
@@ -79,21 +202,20 @@ function wireDifference(parent, title, before, after, testid) {
   section.append(heading);
   const identical = before.body.length === after.body.length && before.body.every((value, index) => value === after.body[index]);
   const body = element('div', 'json-body-diff');
-  const changes = identical ? [] : jsonDifference(before.body, after.body);
+  const json = identical ? null : jsonDifference(before.body, after.body);
   if (identical) diffLine(body, 'diff-empty', '正文逐字节相同');
-  else if (changes === null) diffLine(body, 'diff-empty', '正文不是完整 JSON，请展开字节差异查看改动。');
-  else if (!changes.length) diffLine(body, 'diff-empty', 'JSON 内容相同；字段顺序、序列化与空白变化见字节差异。');
+  else if (json === null) diffLine(body, 'diff-empty', '正文不是完整 JSON，请展开原始字节 DIFF 查看改动。');
+  else if (!json.changes.length) diffLine(body, 'diff-empty', 'JSON 内容相同；字段顺序、序列化与空白变化见原始字节 DIFF。');
   else {
-    body.append(element('p', 'diff-body-summary', `JSON 字段变化 · ${changes.length} 处`));
-    for (const change of changes) {
-      const item = element('div', 'diff-item');
+    body.append(element('p', 'diff-body-summary', `JSON 正文 DIFF · ${json.changes.length} 处字段变化 · 格式化后比较，忽略字段顺序和空白`));
+    const paths = element('div', 'diff-paths');
+    for (const change of json.changes) {
+      const item = element('code', '', `${change.before === undefined ? '新增' : change.after === undefined ? '删除' : '修改'} ${change.path}`);
       item.dataset.jsonPath = change.path;
-      item.append(element('code', '', change.path));
-      const format = value => value === undefined ? '（字段不存在）' : JSON.stringify(value, null, 2);
-      diffLine(item, 'removed', `− ${format(change.before)}`);
-      diffLine(item, 'added', `+ ${format(change.after)}`);
-      body.append(item);
+      paths.append(item);
     }
+    body.append(paths);
+    lineDifference(body, json.before, json.after);
   }
   section.append(body);
   const metadata = snapshot => {
@@ -108,7 +230,7 @@ function wireDifference(parent, title, before, after, testid) {
     diffLine(section, 'added', `+ ${key}: ${Object.hasOwn(right, key) ? visible(right[key]) : '（不存在）'}`);
   }
   const bytes = element('details', 'byte-diff');
-  bytes.append(element('summary', '', `字节差异（含字段顺序与空白） · ${before.body.length} → ${after.body.length} 字节`));
+  bytes.append(element('summary', '', `原始字节 DIFF（含字段顺序与空白） · ${before.body.length} → ${after.body.length} 字节`));
   let rendered = false;
   bytes.addEventListener('toggle', () => {
     if (!bytes.open || rendered) return;

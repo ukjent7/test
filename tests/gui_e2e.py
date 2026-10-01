@@ -5,6 +5,8 @@ Frontend refactor failure scenarios, specified before implementation:
 - Opening details eagerly computes byte differences or expands complete bodies.
 - Byte-diff timeout paints entire bodies instead of retaining neutral raw snapshots.
 - Missing/null/type/array changes must remain distinct; JSON whitespace stays inspectable.
+- A line diff must show line numbers, nearby context and the changed word, not full bodies.
+- Raw JSON token diff must finish on reordered large bodies; budget exhaustion still shows a diff.
 - Primary connection/model/provider controls fall below the first desktop viewport.
 - Editing one provider exposes unrelated fields or Cancel loses the initiating focus.
 - Filtering silently changes the selected model; picker keyboard/dismissal is broken.
@@ -407,7 +409,7 @@ def run(binary, output, test):
         page.keyboard.press("Enter")
         expect(page.locator("#diff-dialog")).to_be_visible()
         expect(page.get_by_test_id("diff-content")).to_contain_text("PRIVATE_USER_MESSAGE")
-        expect(page.get_by_test_id("wire-response-1").locator('[data-json-path="/content/0/signature"]')).to_contain_text("（字段不存在）")
+        expect(page.get_by_test_id("wire-response-1").locator('[data-json-path="/content/0/signature"]')).to_contain_text("新增")
         page.keyboard.press("Escape")
         expect(inspection).to_be_focused()
         passed("request-rows-keyboard-inspection-and-local-copy-feedback")
@@ -541,6 +543,32 @@ def run(binary, output, test):
             expect(page.get_by_test_id("diff-request")).to_be_visible()
             expect(page.get_by_test_id("diff-response")).to_be_visible()
 
+        def verify_raw_diff(detail):
+            before = bytes(detail["exchange"]["request"]["body"])
+            after = bytes(detail["exchange"]["attempts"][0]["request"]["body"])
+            result = bytearray()
+            old_offset = new_offset = 0
+            for text in page.get_by_test_id("wire-request-1").locator(".byte-diff pre.removed, .byte-diff pre.added").all_text_contents():
+                label, payload = text.split(": ", 1)
+                direction, _, offset, _, length, _ = label.split(" ")
+                offset = int(offset)
+                block = bytes.fromhex(payload[4:]) if payload.startswith("HEX ") else json.loads(payload).encode("utf-8")
+                assert len(block) == int(length)
+                if direction == "−":
+                    assert offset >= old_offset
+                    result.extend(before[old_offset:offset])
+                    new_offset += offset - old_offset
+                    assert before[offset:offset + len(block)] == block
+                    old_offset = offset + len(block)
+                else:
+                    assert offset >= new_offset
+                    result.extend(before[old_offset:old_offset + offset - new_offset])
+                    old_offset += offset - new_offset
+                    result.extend(block)
+                    new_offset = offset + len(block)
+            result.extend(before[old_offset:])
+            assert bytes(result) == after, "displayed byte diff must reconstruct the forwarded body exactly"
+
         # No response repair and disabled forwarding must not invent changes.
         disabled_call = next(call for call in context.request.get(address + "/ui/status").json()["calls"]
                              if call["status"] == 503)
@@ -594,9 +622,9 @@ def run(binary, output, test):
         assert "PRIVATE_API_KEY" not in json.dumps(detail)
         open_diff(detail)
         json_response = page.get_by_test_id("wire-response-1").locator(".json-body-diff")
-        expect(json_response.locator('[data-json-path="/content/0/thinking"]')).to_contain_text("− null")
-        expect(json_response.locator('[data-json-path="/content/0/thinking"]')).to_contain_text('+ ""')
-        expect(page.get_by_test_id("wire-request-1").locator('[data-json-path="/messages/2"]')).to_contain_text("（字段不存在）")
+        expect(json_response.locator('.removed').filter(has_text='"thinking": null')).to_have_count(1)
+        expect(json_response.locator('.added').filter(has_text='"thinking": ""')).to_have_count(1)
+        expect(page.get_by_test_id("wire-request-1").locator('[data-json-path="/messages/2"]')).to_contain_text("删除")
         expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False).replace(" ", "\\u0020"))
         expect(page.get_by_test_id("diff-request")).to_contain_text("/messages/2/content/1 → /messages/1/content/0")
         expect(page.get_by_test_id("diff-response")).to_contain_text("− signature: null")
@@ -661,6 +689,7 @@ def run(binary, output, test):
         expect(page.get_by_test_id("wire-request-1")).to_contain_text("\\r\\n")
         expect(page.get_by_test_id("wire-request-1")).to_contain_text("字节")
         expect(page.get_by_test_id("wire-response-1")).to_contain_text("字节")
+        verify_raw_diff(whitespace_detail)
         page.get_by_test_id("wire-original-request").locator("summary").click()
         expect(page.get_by_test_id("wire-original-request")).to_contain_text("history-gui-whitespace")
         page.screenshot(path=str(output / "diff-byte-whitespace-narrow.png"))
@@ -689,11 +718,12 @@ def run(binary, output, test):
         # Synthetic reproduction of the 52 KB request: only /model changes,
         # while serialization reorders nested input/tool/schema objects.
         large_body = {"model": "opencode/large-json-diff", "input": [
-            {"role": "user", "content": "UNCHANGED_LARGE_BODY_MARKER"}],
+            {"role": "user", "content": "fixture input"}],
             "tools": [{"type": "function", "name": f"fixture_{index}", "parameters": {
                 "type": "object", "properties": {"z_tail": {"description": "x" * 360, "type": "string"},
                                                   "a_head": {"type": "integer"}}}}
                       for index in range(119)], "stream": False}
+        large_body["tools"][-1]["parameters"]["properties"]["z_tail"]["description"] += "UNCHANGED_LARGE_BODY_MARKER"
         response = context.request.post(address + "/v1/responses", data=large_body)
         assert response.status == 200
         large_detail = latest_detail()
@@ -701,8 +731,10 @@ def run(binary, output, test):
         page.evaluate("""() => {
             window.originalByteDiff = ByteDiff;
             window.byteDiffCalls = 0;
+            window.diffTokenTypes = [];
             window.ByteDiff = {diffArrays(...args) {
                 window.byteDiffCalls++;
+                window.diffTokenTypes.push(typeof args[0][0]);
                 return window.originalByteDiff.diffArrays(...args);
             }};
         }""")
@@ -714,18 +746,34 @@ def run(binary, output, test):
         expect(json_diff).to_contain_text('"opencode/large-json-diff"')
         expect(json_diff).to_contain_text('"large-json-diff"')
         expect(json_diff).not_to_contain_text("UNCHANGED_LARGE_BODY_MARKER")
-        assert page.evaluate("window.byteDiffCalls") == 0
+        assert page.evaluate("window.diffTokenTypes.every(type => type === 'string')")
+        expect(json_diff.locator('.removed mark')).to_have_text(["opencode/"])
+        expect(json_diff.locator('.diff-context')).not_to_have_count(0)
+        expect(json_diff.locator('.removed[data-old-line]')).to_have_count(1)
+        expect(json_diff.locator('.added[data-new-line]')).to_have_count(1)
+        expect(json_diff.locator('.diff-gap')).not_to_have_count(0)
         assert not page.locator("#diff-content details[open]").count()
         json_diff.scroll_into_view_if_needed()
         page.screenshot(path=str(output / "large-json-field-diff.png"))
         passed("json-body-diff-reordering-single-field-and-lazy-bytes")
+        calls_before_raw = page.evaluate("window.byteDiffCalls")
+        wire_request.locator(".byte-diff summary").click()
+        expect(wire_request.locator(".byte-diff .removed")).not_to_have_count(0)
+        assert page.evaluate("window.byteDiffCalls") > calls_before_raw
+        expect(wire_request.locator(".byte-diff")).not_to_contain_text("计算超时")
+        verify_raw_diff(large_detail)
+        page.keyboard.press("Escape")
+        open_diff(large_detail)
         page.evaluate("window.ByteDiff = {diffArrays: () => undefined}")
         wire_request.locator(".byte-diff summary").click()
-        expect(wire_request.locator(".byte-diff")).to_contain_text("计算超时")
-        expect(wire_request.locator(".byte-diff .removed, .byte-diff .added")).to_have_count(0)
+        expect(wire_request.locator(".byte-diff")).not_to_contain_text("计算超时")
+        expect(wire_request.locator(".byte-diff .removed")).not_to_have_count(0)
+        expect(wire_request.locator(".byte-diff .added")).not_to_have_count(0)
+        verify_raw_diff(large_detail)
+        json_diff = wire_request.locator(".json-body-diff")
         expect(json_diff.locator("[data-json-path]")).to_have_count(1)
         wire_request.locator(".byte-diff").scroll_into_view_if_needed()
-        page.screenshot(path=str(output / "byte-timeout-neutral-fallback.png"))
+        page.screenshot(path=str(output / "byte-budget-fallback-diff.png"))
         page.get_by_test_id("wire-original-request").locator("summary").click()
         expect(page.get_by_test_id("wire-original-request")).to_contain_text("UNCHANGED_LARGE_BODY_MARKER")
         page.get_by_role("button", name="复制差异", exact=True).click()
@@ -733,7 +781,7 @@ def run(binary, output, test):
         (output / "large-json-diff.json").write_text(json.dumps(large_detail, ensure_ascii=False), encoding="utf-8")
         page.evaluate("window.ByteDiff = window.originalByteDiff; delete window.originalByteDiff")
         page.keyboard.press("Escape")
-        passed("byte-diff-timeout-preserves-full-data-without-body-highlights")
+        passed("byte-diff-budget-fallback-shows-changes-and-preserves-full-data")
         retained = context.request.get(address + "/ui/status").json()["calls"]
         retained_usage = context.request.get(address + "/ui/usage").json()
         assert script_errors == [], script_errors

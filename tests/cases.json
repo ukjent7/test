@@ -146,7 +146,7 @@
     "diff-sse-event-index-and-theme",
     "byte-diff-whitespace-full-error-filter-and-copy",
     "json-body-diff-reordering-single-field-and-lazy-bytes",
-    "byte-diff-timeout-preserves-full-data-without-body-highlights",
+    "byte-diff-budget-fallback-shows-changes-and-preserves-full-data",
     "all-frontend-workflows-without-script-errors",
     "restart-loads-settings-and-complete-request-history"
   ],

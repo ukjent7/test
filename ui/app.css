@@ -217,6 +217,18 @@ input+label { margin-top: 14px; }
 .diff-item .added, #diff-content>section>.added { background: var(--green-soft); }
 .diff-empty { background: var(--inset); color: var(--muted); border-radius: 8px; }
 .diff-body-summary { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+.diff-paths { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 8px; color: var(--muted); font-size: 10px; }
+.diff-patch { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#diff-content .diff-row { display: flex; gap: 12px; padding: 4px 10px; }
+.diff-number { flex: 0 0 5ch; color: var(--muted); text-align: right; user-select: none; }
+.diff-code { min-width: 0; }
+.diff-context, .diff-gap { color: var(--muted); }
+.diff-gap { padding: 6px 10px; font-size: 10px; background: var(--inset); }
+.diff-patch .removed, .byte-diff .removed { background: var(--red-soft); }
+.diff-patch .added, .byte-diff .added { background: var(--green-soft); }
+#diff-content mark { color: var(--card); font-weight: 700; border-radius: 2px; }
+#diff-content .removed mark { background: var(--red); }
+#diff-content .added mark { background: var(--green); }
 #diff-content details { margin-top: 12px; }
 #diff-content summary { overflow-wrap: anywhere; }
 .diff-raw { background: var(--inset); }
