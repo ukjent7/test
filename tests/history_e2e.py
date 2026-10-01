@@ -3,7 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
-import http.client
+import http.client as http_client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -71,7 +71,7 @@ def run(binary, output):
     process = None
 
     def http(method, path, body=None):
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection = http_client.HTTPConnection("127.0.0.1", port, timeout=10)
         connection.request(method, path, body, {"Content-Type": "application/json",
             "Authorization": "Bearer PRIVATE_CLIENT_KEY", "Cookie": "PRIVATE_CLIENT_COOKIE",
             "Connection": "keep-alive, x-remove", "x-remove": "remove  spaces"})
@@ -188,7 +188,7 @@ def run(binary, output):
 
         try:
             http("POST", "/v1/messages", b'{"model":"history-sse-truncated"}')
-        except (http.client.HTTPException, OSError):
+        except (http_client.HTTPException, OSError):
             pass
         else:
             raise AssertionError("truncated stream appeared complete")
@@ -198,7 +198,7 @@ def run(binary, output):
         assert not value["exchange"]["response"]["complete"] and value["exchange"]["error"]
         passed("truncated-stream-partial-bytes-and-error")
 
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection = http_client.HTTPConnection("127.0.0.1", port, timeout=10)
         connection.request("POST", "/v1/messages", b'{"model":"history-sse-cancel"}',
                            {"Content-Type": "application/json"})
         response = connection.getresponse()
