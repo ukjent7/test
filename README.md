@@ -76,6 +76,17 @@ api_backend = "chat_completions"
 
 前端使用原生 ES modules，随二进制打包，无需 Node 构建：`app.js` 管理导航和状态同步，`gateway` / `settings` 管理接入与设置，`activity` / `details` 展示历史与完整交换，`usage` 展示累计用量。方向键、Home / End 可切换页面；模型与协议选择会更新可复制的客户端配置。
 
-CI 使用 `--locked`，执行格式检查、Clippy、Windows/Linux 构建及 HTTP、历史记录、GUI E2E；测试使用本地夹具，不需要个人 API key。Actions 的 `e2e-*` 产物保留请求/响应、截图、trace、报告和 SHA-256 清单，失败时也上传已有证据。
+CI 使用 `--locked`，执行格式与脚本语法检查、Clippy、Windows/Linux 构建。每个平台只构建一次，无界面 E2E（HTTP、历史、代理及流水线故障验证）与 GUI E2E 独立运行；Windows 驱动原生 WebView2，Linux 检查原生窗口并用 Chromium 验证界面。测试使用本地夹具，无需个人 API key。
 
-`main` 的全部检查通过后，工作流自动创建 `build-<运行序号>` tag 和 Release，附带两个平台的已验证二进制、SHA256SUMS 与 CI 链接。
+`tests/common.py` 统一测试生命周期；`tests/cases.json` 固定完整覆盖清单。`tests/run_e2e.py` 运行整个分组，单套失败仍继续其它套件，超时清理进程树。Actions 的 `build-*` 产物保留构建来源与二进制，`e2e-<平台>-<分组>` 保留请求/响应、数据库、截图、trace、日志、逐套报告、SHA-256 清单与 JUnit；失败时也上传已有证据。
+
+在 CI 使用已构建的程序重复运行与核验（输出目录须为空；Linux GUI 需通过 `dbus-run-session -- xvfb-run -a` 启动）：
+
+```sh
+python tests/run_e2e.py --gateway binaries/messages-gateway --checker binaries/grok-wire-check --group headless --check-pipeline --output artifacts/evidence
+python tests/ci.py verify-evidence --gateway binaries/messages-gateway --evidence artifacts/evidence --group headless --platform linux --require-pipeline
+```
+
+Windows 路径加 `.exe`，核验平台改为 `windows`；GUI 使用 `--group gui`，省略 `--check-pipeline`。离线核验 CI 产物时，将 `GITHUB_SHA` 设置为对应提交。
+
+发布门禁逐项核验完整用例、进程退出状态、证据校验和、提交及二进制身份；流水线 E2E 还验证漏测、损坏证据、错误二进制、失败继续运行、旧目录拒绝复用和超时清理。`main` 全部检查通过后自动创建 `build-<运行序号>` tag 和 Release，发布同一份已测试二进制，附带 SHA256SUMS、`verification.json`、`junit.xml` 与 CI 链接。

@@ -1,9 +1,11 @@
 """Fetch the pinned, unmodified production decoder for the E2E client."""
 
+import argparse
 import hashlib
-import json
 from pathlib import Path
 import urllib.request
+
+from common import write_json
 
 
 REVISION = "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8"
@@ -11,7 +13,7 @@ SOURCE = f"https://raw.githubusercontent.com/xai-org/grok-build/{REVISION}/crate
 ROOT = Path(__file__).resolve().parent
 
 
-def main():
+def main(output):
     with urllib.request.urlopen(SOURCE, timeout=60) as response:
         source = response.read()
     digest = hashlib.sha256(source).hexdigest()
@@ -22,13 +24,13 @@ def main():
     vendor = ROOT / "grok-wire/vendor"
     vendor.mkdir(parents=True, exist_ok=True)
     (vendor / "messages.rs").write_bytes(source)
-    artifact = Path("artifacts/e2e")
-    artifact.mkdir(parents=True, exist_ok=True)
-    (artifact / "grok-wire-source.json").write_text(json.dumps({
+    output.mkdir(parents=True, exist_ok=True)
+    write_json(output / "grok-wire-source.json", {
         "revision": REVISION, "url": SOURCE, "sha256": digest,
-    }, indent=2), encoding="utf-8")
-    (artifact / "missing-signature.json").write_bytes((ROOT / "fixtures/missing-signature.json").read_bytes())
+    })
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path("artifacts/wire"))
+    main(parser.parse_args().output)

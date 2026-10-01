@@ -1,25 +1,19 @@
 """Real gateway -> real HTTP fixtures -> SQLite and byte-exact history evidence; CI only."""
 
-import argparse
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
 import http.client as http_client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import shutil
-import socket
 import sqlite3
-import subprocess
 import threading
 import time
 
+from common import free_port, stop_process, suite_cli, wait_ready
 
-def run(binary, output):
-    output.mkdir(parents=True, exist_ok=True)
-    report = {"status": "running", "cases": [], "commit": os.environ.get("GITHUB_SHA"),
-              "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+
+def run(binary, output, test):
     captures = {}
     release = threading.Event()
     error_wire = b'{ "error" : {"message": "fixture error \\t \\n"} }\r\n'
@@ -78,10 +72,8 @@ def run(binary, output):
                 self.close_connection = True
 
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+    test.server(upstream)
+    port = free_port()
     db = output.resolve() / "requests.sqlite3"
     db.unlink(missing_ok=True)
     (output / "settings.json").unlink(missing_ok=True)
@@ -90,7 +82,7 @@ def run(binary, output):
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/v1",
            "GATEWAY_OPENCODE_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/v1",
            "GATEWAY_STEPFUN_API_KEY": "PRIVATE_CONFIGURED_KEY"}
-    log = (output / "gateway.log").open("wb")
+    log = test.log("gateway.log")
     process = None
 
     def http(method, path, body=None):
@@ -112,16 +104,8 @@ def run(binary, output):
 
     def launch(executable=binary, environment=env, cwd=None):
         nonlocal process
-        process = subprocess.Popen([str(executable), "--headless"], env=environment, cwd=cwd, stdout=log, stderr=log)
-        for _ in range(200):
-            if process.poll() is not None:
-                raise RuntimeError("gateway exited during startup")
-            try:
-                if http("GET", "/health")[0] == 200:
-                    return
-            except OSError:
-                time.sleep(0.05)
-        raise RuntimeError("gateway did not become ready")
+        process = test.spawn([str(executable), "--headless"], env=environment, cwd=cwd, stdout=log, stderr=log)
+        wait_ready(process, port)
 
     def settled():
         for _ in range(200):
@@ -142,11 +126,10 @@ def run(binary, output):
         (output / f"{model.replace('/', '-')}.json").write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         return value
 
-    def passed(name):
-        report["cases"].append({"name": name, "status": "passed"})
+    passed = test.passed
 
     try:
-        process = subprocess.Popen([str(binary), "--headless"], env={**env, "GATEWAY_DB": str(output.resolve())},
+        process = test.spawn([str(binary), "--headless"], env={**env, "GATEWAY_DB": str(output.resolve())},
                                    stdout=log, stderr=log)
         assert process.wait(timeout=10) != 0, "invalid database path was silently ignored"
         passed("database-open-failure-is-explicit")
@@ -293,8 +276,7 @@ def run(binary, output):
             assert connection.execute("select count(*) from calls").fetchone()[0] == 100
             assert connection.execute("pragma integrity_check").fetchone()[0] == "ok"
         passed("concurrent-records-and-transactional-100-row-retention")
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
         launch()
         after_restart = settled()
         assert get("/ui/usage") == usage_before_restart
@@ -309,8 +291,7 @@ def run(binary, output):
         with sqlite3.connect(db) as source, sqlite3.connect(output / "history-backup.sqlite3") as backup:
             source.backup(backup)
         (output / "upstream-captures.json").write_text(json.dumps(captures, indent=2), encoding="utf-8")
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
         anchor, day = 1700000000000, 86400000
         with sqlite3.connect(db) as connection:
             connection.execute("DROP TABLE usage")
@@ -325,14 +306,12 @@ def run(binary, output):
         windows = {str(days): get(f"/ui/usage?since={anchor - days * day}") for days in (0, 6, 29)}
         assert [value["total"]["requests"] for value in windows.values()] == [1, 2, 3]
         assert all(value["total"]["cache_hit_rate"] == 50 for value in windows.values())
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
         launch()
         assert get("/ui/usage") == migration
         (output / "usage-upgrade-and-windows.json").write_text(json.dumps({"anchor": anchor, "windows": windows, "all": migration}, indent=2), encoding="utf-8")
         passed("legacy-history-backfill-idempotent-local-day-window-boundaries")
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
         portable = output.resolve() / "便携 网关"
         portable.mkdir(exist_ok=True)
         portable_binary = portable / binary.name
@@ -353,8 +332,7 @@ def run(binary, output):
         assert http("POST", "/v1/messages", b'{"model":"portable-history"}')[0] == 200
         portable_calls = settled()["calls"]
         assert len(portable_calls) == 1
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
         launch(portable_binary, portable_env, launch_cwd)
         assert settled()["calls"] == portable_calls
         assert not list(launch_cwd.iterdir()) and not outside.exists()
@@ -362,28 +340,9 @@ def run(binary, output):
             "cwd": str(launch_cwd), "settings": str(portable / "settings.json"),
             "database": str(portable / "requests.sqlite3"), "calls": portable_calls}, indent=2), encoding="utf-8")
         passed("portable-defaults-ignore-cwd-and-user-directories-and-survive-restart")
-        report["status"] = "passed"
-    except BaseException as error:
-        report.update(status="failed", error=repr(error))
-        raise
     finally:
         release.set()
-        if process is not None and process.poll() is None:
-            process.terminate()
-            process.wait(timeout=10)
-        upstream.shutdown()
-        upstream.server_close()
-        log.close()
-        (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json"}
-        (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"History E2E passed: {len(report['cases'])} cases; evidence: {output}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gateway", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("artifacts/history"))
-    args = parser.parse_args()
-    run(args.gateway.resolve(), args.output)
+    suite_cli("history", run)

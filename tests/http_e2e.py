@@ -3,120 +3,22 @@
 Run only in CI or against an already built binary. No provider credentials needed.
 """
 
-import argparse
-import hashlib
 import http.client
 import json
 import os
-from pathlib import Path
 import re
-import socket
 import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from wire_fixtures import MISSING, MESSAGE, START, END, NATIVE_SSE, ZEN_WIRE, CACHE_FIXTURES, EVENTS, frame, decode_sse
+
+from common import free_port, suite_cli, wait_ready
 
 
-ROOT = Path(__file__).resolve().parent
-MISSING = json.loads((ROOT / "fixtures/missing-signature.json").read_text())
-MESSAGE = {
-    "id": "msg_e2e", "type": "message", "role": "assistant",
-    "model": "step-5-preview", "content": [], "stop_reason": None,
-    "stop_sequence": None, "usage": {"input_tokens": 411, "output_tokens": 0,
-    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 13824},
-}
-START = {"type": "message_start", "message": MESSAGE}
-END = [
-    {"type": "message_delta", "delta": {"stop_reason": "tool_use",
-     "stop_sequence": None}, "usage": {"output_tokens": 23}},
-    {"type": "message_stop"},
-]
-NATIVE_SSE = b'data: {"delta":"native stream"}\n\ndata: [DONE]\n\n'
-ZEN_WIRE = (ROOT / "fixtures/zen-chat.sse").read_bytes()
-CACHE_FIXTURES = {
-    "cache-messages-hit": ("messages", {"input_tokens": 100, "cache_read_input_tokens": 700,
-        "cache_creation_input_tokens": 200}, {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": 200}),
-    "cache-messages-zero": ("messages", {"input_tokens": 100, "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0}, {"input_tokens": 100, "cache_read_tokens": 0, "cache_write_tokens": 0}),
-    "cache-messages-unknown": ("messages", {"input_tokens": 100},
-        {"input_tokens": 100, "cache_read_tokens": None, "cache_write_tokens": None}),
-    "cache-chat-hit": ("chat/completions", {"prompt_tokens": 1000,
-        "prompt_tokens_details": {"cached_tokens": 700, "cache_write_tokens": 200}},
-        {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": 200}),
-    "cache-chat-zero": ("chat/completions", {"prompt_tokens": 1000, "prompt_tokens_details": {"cached_tokens": 0}},
-        {"input_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": None}),
-    "cache-chat-unknown": ("chat/completions", {"prompt_tokens": 1000},
-        {"input_tokens": 1000, "cache_read_tokens": None, "cache_write_tokens": None}),
-    "cache-chat-deepseek": ("chat/completions", {"prompt_tokens": 1000, "prompt_cache_hit_tokens": 700,
-        "prompt_cache_miss_tokens": 300}, {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": None}),
-    "cache-responses-hit": ("responses", {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 700}},
-        {"input_tokens": 1000, "cache_read_tokens": 700, "cache_write_tokens": None}),
-    "cache-responses-zero": ("responses", {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 0}},
-        {"input_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": None}),
-    "cache-responses-unknown": ("responses", {"input_tokens": 1000},
-        {"input_tokens": 1000, "cache_read_tokens": None, "cache_write_tokens": None}),
-}
-
-
-def delta(index, kind, **fields):
-    return {"type": "content_block_delta", "index": index,
-            "delta": {"type": kind, **fields}}
-
-
-def start(index, kind, **fields):
-    return {"type": "content_block_start", "index": index,
-            "content_block": {"type": kind, **fields}}
-
-
-def stop(index):
-    return {"type": "content_block_stop", "index": index}
-
-
-EVENTS = [
-    START, MISSING, delta(0, "thinking_delta", thinking="检查中文与工具调用"),
-    delta(0, "signature_delta", signature="signed-"),
-    delta(0, "signature_delta", signature="payload"), stop(0),
-    start(1, "thinking", signature=None),
-    delta(1, "thinking_delta", thinking="unsigned reasoning"), stop(1),
-    start(2, "redacted_thinking", data="opaque-redacted"), stop(2),
-    start(3, "text", text=""), delta(3, "text_delta", text="正在读取文件"), stop(3),
-    start(4, "tool_use", id="tool_1", name="read_file", input={}),
-    delta(4, "input_json_delta", partial_json='{"path":"'),
-    delta(4, "input_json_delta", partial_json='README.md"}'), stop(4),
-    {"type": "ping"}, *END,
-]
-
-
-def frame(event, newline="\n", multiline=False):
-    payload = json.dumps(event, ensure_ascii=False, indent=2 if multiline else None)
-    lines = [": upstream heartbeat", "id: event-id", "retry: 1500",
-             "event: " + event["type"]]
-    lines += ["data: " + line for line in payload.splitlines()]
-    return (newline.join(lines) + newline * 2).encode()
-
-
-def decode_sse(wire):
-    values = []
-    for block in wire.decode().replace("\r\n", "\n").split("\n\n"):
-        data = "\n".join(line[5:].removeprefix(" ") for line in block.splitlines()
-                         if line.startswith("data:"))
-        if data:
-            values.append(json.loads(data))
-    return values
-
-
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def run(binary, checker, output):
-    output.mkdir(parents=True, exist_ok=True)
-    report = {"cases": [], "wire_checks": [], "status": "running",
-              "commit": os.environ.get("GITHUB_SHA"),
-              "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-              "grok_decoder_sha256": hashlib.sha256(checker.read_bytes()).hexdigest()}
+def run(binary, checker, output, test):
+    report = test.report
+    report["wire_checks"] = []
     captures = {}
     attempts = {}
     model_errors = {}
@@ -310,7 +212,7 @@ def run(binary, checker, output):
             self.wfile.write(wire)
 
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    test.server(upstream)
     port = free_port()
     database = output.resolve() / "requests.sqlite3"
     database.unlink(missing_ok=True)
@@ -326,13 +228,13 @@ def run(binary, checker, output):
     # The old schema also proves migration works; previous runs cannot supply stale keys.
     (output / "settings.json").write_text(json.dumps({"upstream_base_url": env["GATEWAY_UPSTREAM_BASE_URL"],
                                                     "enabled": True}))
-    log = (output / "gateway.log").open("wb")
-    process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
+    log = test.log("gateway.log")
+    process = test.spawn([str(binary), "--headless"], env=env, stdout=log, stderr=log)
 
     def check_wire(data, kind="event", expected="ok"):
         envelope = json.dumps({"kind": kind, "data": data}) + "\n"
         result = subprocess.run([str(checker)], input=envelope, text=True,
-                                capture_output=True, check=True).stdout.strip()
+                                capture_output=True, check=True, timeout=30).stdout.strip()
         report["wire_checks"].append({"kind": kind, "data": data, "result": result})
         assert expected in result, result
 
@@ -379,20 +281,10 @@ def run(binary, checker, output):
                 "upstream": captures.get(case)}, ensure_ascii=False, indent=2), encoding="utf-8")
         return response.status, {k.lower(): v for k, v in response_headers.items()}, wire
 
-    def passed(case):
-        report["cases"].append({"name": case, "status": "passed"})
+    passed = test.passed
 
     try:
-        for _ in range(100):
-            if process.poll() is not None:
-                raise RuntimeError("gateway exited during startup")
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.1):
-                    break
-            except OSError:
-                time.sleep(0.05)
-        else:
-            raise RuntimeError("gateway did not listen")
+        wait_ready(process, port)
 
         # Prove the exact production decoder rejects the original logged event.
         check_wire(MISSING, expected="missing field `signature`")
@@ -832,33 +724,9 @@ def run(binary, checker, output):
         assert detail["call"]["cache"] == {"input_tokens": None, "output_tokens": None, "cache_read_tokens": None, "cache_write_tokens": None}
         (output / "routed-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("configured-keys-private-and-routing-visible")
-        report["status"] = "passed"
-    except BaseException as error:
-        report["status"] = "failed"
-        report["error"] = repr(error)
-        raise
     finally:
         release.set()
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        upstream.shutdown()
-        upstream.server_close()
-        log.close()
-        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json"}
-        (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"E2E passed: {len(report['cases'])} cases; evidence: {output}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gateway", type=Path, required=True)
-    parser.add_argument("--checker", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("artifacts/e2e"))
-    args = parser.parse_args()
-    run(args.gateway.resolve(), args.checker.resolve(), args.output)
+    suite_cli("http", run, checker=True)

@@ -1,26 +1,19 @@
 """Real gateway, local upstream and recording proxy; CI-only repeatable routing evidence."""
 
-import argparse
 import base64
-import hashlib
 import http.client as http_client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import select
 import socket
 import socketserver
-import subprocess
-import threading
-import time
 from urllib.parse import urlsplit
 
+from common import free_port, stop_process, suite_cli, wait_ready
 
-def run(binary, output):
-    output.mkdir(parents=True, exist_ok=True)
-    report = {"status": "running", "cases": [], "commit": os.environ.get("GITHUB_SHA"),
-              "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+
+def run(binary, output, test):
     captures = []
     socks_connections = []
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -49,7 +42,7 @@ def run(binary, output):
         do_POST = respond
 
     upstream = ThreadingHTTPServer(("0.0.0.0", 0), Upstream)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    test.server(upstream)
 
     class Proxy(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -83,7 +76,7 @@ def run(binary, output):
 
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
     proxy.require_auth = False
-    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    test.server(proxy)
 
     class Socks(socketserver.BaseRequestHandler):
         def handle(self):
@@ -116,10 +109,8 @@ def run(binary, output):
 
     socks = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Socks)
     socks.daemon_threads = True
-    threading.Thread(target=socks.serve_forever, daemon=True).start()
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+    test.server(socks)
+    port = free_port()
     settings_path = output.resolve() / "settings.json"
     base = f"http://{host}:{upstream.server_port}/v1"
     settings = {"upstream_base_url": base, "opencode_base_url": base, "enabled": True}
@@ -131,7 +122,7 @@ def run(binary, output):
                HTTP_PROXY=f"http://127.0.0.1:{proxy.server_port}", NO_PROXY="localhost,127.0.0.1")
     process = None
     registry = []
-    log = (output / "gateway.log").open("wb")
+    log = test.log("gateway.log")
 
     def http(method, path, payload=None):
         connection = http_client.HTTPConnection("127.0.0.1", port, timeout=15)
@@ -150,19 +141,11 @@ def run(binary, output):
 
     def launch():
         nonlocal process
-        process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
-        for _ in range(200):
-            assert process.poll() is None, "gateway exited"
-            try:
-                if http("GET", "/health")[0] == 200:
-                    return
-            except OSError:
-                time.sleep(0.05)
-        raise RuntimeError("gateway did not become ready")
+        process = test.spawn([str(binary), "--headless"], env=env, stdout=log, stderr=log)
+        wait_ready(process, port)
 
     def stop():
-        process.terminate()
-        process.wait(timeout=10)
+        stop_process(process)
 
     def update(**changes):
         assert http("POST", "/ui/settings", {"upstream_base_url": base, **changes})[0] == 204
@@ -181,8 +164,7 @@ def run(binary, output):
         assert code == 200 and len(json.loads(wire)["data"]) == 2, wire
         assert sorted(row["via"] for row in captures[before:]) == sorted(expected)
 
-    def passed(name):
-        report["cases"].append({"name": name, "status": "passed"})
+    passed = test.passed
 
     try:
         launch()
@@ -255,10 +237,6 @@ def run(binary, output):
             request("fixture", "proxy")
             request("opencode/fixture", "proxy")
             passed("windows-internet-options-used-without-proxy-environment")
-        report["status"] = "passed"
-    except BaseException as error:
-        report.update(status="failed", error=repr(error))
-        raise
     finally:
         if process is not None and process.poll() is None:
             stop()
@@ -270,22 +248,9 @@ def run(binary, output):
                         winreg.DeleteValue(key, name)
                     else:
                         winreg.SetValueEx(key, name, 0, kind, value)
-        for server in (proxy, upstream, socks):
-            server.shutdown()
-            server.server_close()
-        log.close()
-        (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         (output / "routes.json").write_text(json.dumps(captures, indent=2), encoding="utf-8")
         (output / "socks-connections.json").write_text(json.dumps(socks_connections, indent=2), encoding="utf-8")
-        manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in output.iterdir() if path.is_file() and path.name != "sha256.json"}
-        (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"Proxy E2E passed: {len(report['cases'])} cases; evidence: {output}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gateway", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("artifacts/proxy"))
-    args = parser.parse_args()
-    run(args.gateway.resolve(), args.output)
+    suite_cli("proxy", run)

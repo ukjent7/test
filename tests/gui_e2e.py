@@ -12,35 +12,24 @@ Existing cases cover themes, narrow layouts, literal diff content, clipboard,
 provider/proxy persistence, request filtering, and complete wire/history details.
 """
 
-import argparse
-import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import shutil
-import socket
 import subprocess
-import threading
 import time
 import tomllib
 import urllib.request
 
 from playwright.sync_api import sync_playwright, expect
-from e2e import EVENTS, decode_sse, frame
+from wire_fixtures import EVENTS, decode_sse, frame
+
+from common import free_port, stop_process, suite_cli, wait_ready as wait_gateway
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def run(binary, output):
-    output.mkdir(parents=True, exist_ok=True)
-    report = {"status": "running", "cases": [], "commit": os.environ.get("GITHUB_SHA"),
-              "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-              "renderer": "native-WebView2" if os.name == "nt" else "Chromium + native-WebKit-smoke"}
+def run(binary, output, test):
+    report = test.report
+    report["renderer"] = "native-WebView2" if os.name == "nt" else "Chromium + native-WebKit-smoke"
     copied_binary = output.resolve() / binary.name
     shutil.copy2(binary, copied_binary)
     binary = copied_binary
@@ -101,7 +90,7 @@ def run(binary, output):
             self.wfile.write(wire)
 
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    test.server(upstream)
     port, debug_port = free_port(), free_port()
     address = f"http://127.0.0.1:{port}"
     settings_path = output.resolve() / "settings.json"
@@ -115,7 +104,7 @@ def run(binary, output):
     env.pop("GATEWAY_UPSTREAM_BASE_URL", None)
     for name in ("GATEWAY_OPENCODE_BASE_URL", "GATEWAY_STEPFUN_API_KEY", "GATEWAY_OPENCODE_API_KEY"):
         env.pop(name, None)
-    log = (output / "desktop.log").open("wb")
+    log = test.log("desktop.log")
     process = None
     browser = None
     context = None
@@ -124,23 +113,13 @@ def run(binary, output):
     tracing = False
 
     def launch(headless=False):
-        return subprocess.Popen([str(binary), *(["--headless"] if headless else [])],
+        return test.spawn([str(binary), *(["--headless"] if headless else [])],
                                 env=env, cwd=launch_cwd, stdout=log, stderr=log)
 
     def wait_ready():
-        for _ in range(300):
-            if process.poll() is not None:
-                raise RuntimeError(f"desktop process exited: {process.returncode}")
-            try:
-                with urllib.request.urlopen(address + "/health", timeout=0.5) as response:
-                    if response.read() == b"ok":
-                        return
-            except OSError:
-                time.sleep(0.1)
-        raise RuntimeError("desktop gateway not ready")
+        wait_gateway(process, port)
 
-    def passed(name):
-        report["cases"].append({"name": name, "status": "passed"})
+    passed = test.passed
 
     try:
         process = launch()
@@ -645,8 +624,7 @@ def run(binary, output):
         browser.close()
         browser = None
         if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=10)
+            stop_process(process)
         # Verify the persisted file is used by a new process, independent of the UI.
         process = launch(headless=True)
         wait_ready()
@@ -662,9 +640,7 @@ def run(binary, output):
         with urllib.request.urlopen(address + f"/ui/calls/{error_detail['call']['id']}") as response:
             assert json.load(response) == error_detail
         passed("restart-loads-settings-and-complete-request-history")
-        report["status"] = "passed"
-    except BaseException as error:
-        report.update(status="failed", error=repr(error))
+    except BaseException:
         if page is not None:
             try:
                 page.screenshot(path=str(output / "failure.png"))
@@ -684,26 +660,7 @@ def run(binary, output):
                 pass
         if playwright is not None:
             playwright.stop()
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        upstream.shutdown()
-        upstream.server_close()
-        log.close()
-        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json" and path.resolve() != binary}
-        (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"GUI E2E passed: {len(report['cases'])} cases; evidence: {output}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gateway", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("artifacts/gui"))
-    args = parser.parse_args()
-    run(args.gateway.resolve(), args.output)
+    suite_cli("gui", run)

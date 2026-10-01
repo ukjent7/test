@@ -13,15 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_PROFILE_DEV_DEBUG: 0
-  RUST_BACKTRACE: 1
-
 jobs:
-  format:
-    name: Rust format
+  quality:
+    name: Source checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,118 +25,69 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
-
-  build-and-e2e:
-    name: Build and E2E (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: tests/requirements.txt
-      - name: Linux desktop prerequisites
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev xvfb x11-utils dbus-x11 fonts-noto-cjk
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Record build inputs
+      - run: cargo fmt --all -- --check
+      - name: Check E2E and frontend syntax
         run: |
-          mkdir -p artifacts
-          rustc --version --verbose > artifacts/toolchain.txt
-          cargo tree --locked --depth 1 > artifacts/dependencies.txt
-      - name: Lint and build gateway
-        run: |
-          cargo clippy --locked --release --bin messages-gateway -- -D warnings
-          cargo build --locked --release
-      - name: Fetch exact Grok production wire types
-        run: python tests/fetch_grok_wire.py
-      - name: Build Grok wire client
-        run: cargo build --locked --release --manifest-path tests/grok-wire/Cargo.toml --target-dir target
-      - name: HTTP end-to-end regression
-        run: |
-          suffix=""
-          if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
-          python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "target/release/grok-wire-check${suffix}"
-          python tests/history_e2e.py --gateway "target/release/messages-gateway${suffix}"
-          python tests/proxy_e2e.py --gateway "target/release/messages-gateway${suffix}"
-      - name: Install GUI E2E driver
-        run: python -m pip install -r tests/requirements.txt
-      - name: Cache Linux E2E browser
-        if: runner.os == 'Linux'
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/requirements.txt') }}
-      - name: Prepare Linux E2E browser
-        if: runner.os == 'Linux'
-        run: python -m playwright install --with-deps chromium
-      - name: Desktop GUI end-to-end
-        timeout-minutes: 5
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            python tests/gui_e2e.py --gateway target/release/messages-gateway.exe
-          else
-            dbus-run-session -- xvfb-run -a python tests/gui_e2e.py --gateway target/release/messages-gateway
-          fi
-      - name: Upload repeatable E2E evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-${{ matrix.os }}
-          path: |
-            artifacts/e2e/
-            artifacts/history/
-            artifacts/proxy/
-            artifacts/gui/*.png
-            artifacts/gui/*.json
-            artifacts/gui/*.sqlite3
-            artifacts/gui/*.log
-            artifacts/gui/*.txt
-            artifacts/gui/*.zip
-            artifacts/toolchain.txt
-            artifacts/dependencies.txt
-            Cargo.lock
-            tests/grok-wire/Cargo.lock
-          if-no-files-found: warn
-      - name: Upload binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: messages-gateway-${{ matrix.os }}
-          path: |
-            target/release/messages-gateway
-            target/release/messages-gateway.exe
-          if-no-files-found: error
+          python -m compileall -q tests
+          for file in ui/*.js; do node --input-type=module --check < "$file"; done
+
+  platform:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+          - platform: windows
+            os: windows-latest
+    uses: ./.github/workflows/platform.yml
+    with:
+      platform: ${{ matrix.platform }}
+      os: ${{ matrix.os }}
 
   ci-status:
     name: All checks passed
     if: always()
-    needs: [format, build-and-e2e]
+    needs: [quality, platform]
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
       - name: Require every job to pass
         env:
-          FORMAT: ${{ needs.format.result }}
-          BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
-        run: test "$FORMAT" = success && test "$BUILD_AND_E2E" = success
+          QUALITY: ${{ needs.quality.result }}
+          PLATFORMS: ${{ needs.platform.result }}
+        run: test "$QUALITY" = success && test "$PLATFORMS" = success
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with:
+          path: verified-inputs
+      - name: Verify coverage, evidence and release binary identity
+        run: python tests/ci.py gate --artifacts verified-inputs --output release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verified-release
+          path: release/
+          if-no-files-found: error
+      - name: Publish verification summary
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          verification = json.loads(Path("release/verification.json").read_text())
+          print("| Platform | Suite | Passed cases |\n| --- | --- | ---: |")
+          for platform, result in verification["platforms"].items():
+              for suite in result["suites"]:
+                  print(f"| {platform} | {suite['suite']} | {suite['cases']} |")
+          PY
 
   release:
     name: Publish release
@@ -155,17 +100,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: messages-gateway-*
-          path: binaries
-      - name: Prepare release files
-        run: |
-          mkdir release
-          cp binaries/messages-gateway-windows-latest/messages-gateway.exe release/messages-gateway.exe
-          cp binaries/messages-gateway-ubuntu-latest/messages-gateway release/messages-gateway-linux-x64
-          cd release
-          sha256sum messages-gateway.exe messages-gateway-linux-x64 > SHA256SUMS
-          sha256sum --check SHA256SUMS
-      - name: Publish verified binaries
+          name: verified-release
+          path: release
+      - name: Verify downloaded release files
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+      - name: Publish verified binaries and evidence index
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -186,7 +126,8 @@ jobs:
           [Windows/Linux 构建与完整 E2E](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) 全部通过。
 
           Windows x64 下载 messages-gateway.exe；Linux x64 下载 messages-gateway-linux-x64，运行前执行 chmod +x。
-          SHA256SUMS 可用于核验下载文件；设置、请求历史与 WebView 数据保存在程序所在目录。
+          SHA256SUMS 核验所有附件；verification.json 记录二进制哈希与各套 E2E 覆盖数量，junit.xml 提供完整用例索引。
+          设置、请求历史与 WebView 数据保存在程序所在目录。
           EOF
           gh release create "$tag" release/* \
             --target "$GITHUB_SHA" --title "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA:0:7})" \
