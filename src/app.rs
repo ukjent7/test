@@ -526,7 +526,7 @@ async fn call_diff(
 #[derive(Deserialize)]
 struct UsageQuery {
     #[serde(default)]
-    since: u64,
+    since: i64,
 }
 
 async fn usage(
@@ -534,7 +534,9 @@ async fn usage(
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let control = gateway.control.lock().unwrap();
-    Ok(Json(control.history.usage(query.since).map_err(history_error)?))
+    Ok(Json(
+        control.history.usage(query.since).map_err(history_error)?,
+    ))
 }
 
 fn history_error(error: rusqlite::Error) -> ApiError {

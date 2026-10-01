@@ -86,7 +86,7 @@ impl History {
             .optional()
     }
 
-    pub fn usage(&self, since: u64) -> rusqlite::Result<Value> {
+    pub fn usage(&self, since: i64) -> rusqlite::Result<Value> {
         let aggregate = |provider: &str, model: &str, group: &str| {
             self.0
                 .prepare(&format!(
@@ -101,15 +101,15 @@ impl History {
                     Ok(json!({
                         "provider": row.get::<_, Option<String>>(0)?,
                         "model": row.get::<_, Option<String>>(1)?,
-                        "requests": row.get::<_, u64>(2)?,
-                        "input_tokens": row.get::<_, Option<u64>>(3)?,
-                        "output_tokens": row.get::<_, Option<u64>>(4)?,
-                        "cache_read_tokens": row.get::<_, Option<u64>>(5)?,
-                        "cache_write_tokens": row.get::<_, Option<u64>>(6)?,
-                        "input_reported_requests": row.get::<_, u64>(7)?,
-                        "output_reported_requests": row.get::<_, u64>(8)?,
-                        "cache_reported_requests": row.get::<_, u64>(9)?,
-                        "cache_write_reported_requests": row.get::<_, u64>(10)?,
+                        "requests": row.get::<_, i64>(2)?,
+                        "input_tokens": row.get::<_, Option<i64>>(3)?,
+                        "output_tokens": row.get::<_, Option<i64>>(4)?,
+                        "cache_read_tokens": row.get::<_, Option<i64>>(5)?,
+                        "cache_write_tokens": row.get::<_, Option<i64>>(6)?,
+                        "input_reported_requests": row.get::<_, i64>(7)?,
+                        "output_reported_requests": row.get::<_, i64>(8)?,
+                        "cache_reported_requests": row.get::<_, i64>(9)?,
+                        "cache_write_reported_requests": row.get::<_, i64>(10)?,
                         "cache_hit_rate": row.get::<_, Option<f64>>(11)?,
                     }))
                 })?
