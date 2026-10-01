@@ -72,6 +72,8 @@ api_backend = "chat_completions"
 
 使用 Rust stable、edition 2024，提交依赖锁文件。遵循 [AGENTS.md](AGENTS.md)；本机不安装 Rust、不编译，构建和验证交给 [GitHub Actions](.github/workflows/ci.yml)。
 
+后端按职责组织：`main` 启动程序，`app` 管理状态与本地界面接口，`forwarding` 转发 HTTP，`protocol` 处理 Messages/SSE 兼容，`settings` 读写配置与创建网络客户端；`app::trace` 与 `history` 记录并持久化请求，`zen` 封装 Zen 兼容处理。
+
 CI 使用 `--locked`，执行格式检查、Clippy、Windows/Linux 构建及 HTTP、历史记录、GUI E2E；测试使用本地夹具，不需要个人 API key。Actions 的 `e2e-*` 产物保留请求/响应、截图、trace、报告和 SHA-256 清单，失败时也上传已有证据。
 
 `main` 的全部检查通过后，工作流自动创建 `build-<运行序号>` tag 和 Release，附带两个平台的已验证二进制、SHA256SUMS 与 CI 链接。

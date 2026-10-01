@@ -6,7 +6,7 @@ use std::{
 use axum::http::{HeaderMap, header};
 use serde_json::{Value, json};
 
-use crate::{ApiError, app::Change, cache};
+use crate::{app::Change, cache, error::ApiError};
 
 pub fn is_zen(url: &reqwest::Url) -> bool {
     url.host_str() == Some("opencode.ai")

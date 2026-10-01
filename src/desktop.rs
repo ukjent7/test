@@ -17,7 +17,7 @@ pub fn run(page: Result<String, String>) -> Result<(), Box<dyn std::error::Error
     eprintln!("desktop window created");
     let data_directory = std::env::var_os("WEBVIEW2_USER_DATA_FOLDER")
         .map(std::path::PathBuf::from)
-        .unwrap_or(crate::app::program_directory()?.join("webview"));
+        .unwrap_or(crate::settings::program_directory()?.join("webview"));
     let mut context = WebContext::new(Some(data_directory));
     eprintln!("desktop browser context created");
     let builder = match page {
