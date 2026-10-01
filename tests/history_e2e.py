@@ -116,7 +116,7 @@ def run(binary, output):
         assert all(key not in call for key in ("exchange", "diff"))
         for secret in ("PRIVATE_CLIENT_KEY", "PRIVATE_CONFIGURED_KEY", "PRIVATE_CLIENT_COOKIE", "PRIVATE_RESPONSE_COOKIE"):
             assert secret not in json.dumps(value), secret
-        (output / f"{model}.json").write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output / f"{model.replace('/', '-')}.json").write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         return value
 
     def passed(name):
