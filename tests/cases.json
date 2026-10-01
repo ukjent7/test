@@ -116,6 +116,11 @@
     "windows-internet-options-used-without-proxy-environment"
   ],
   "gui": [
+    "compact-shell-primary-controls-visible-without-scrolling",
+    "provider-editor-scoped-and-cancel-restores-focus",
+    "model-picker-keyboard-search-preserves-selection-and-dismisses",
+    "client-model-and-protocol-preferences-survive-reload",
+    "request-rows-keyboard-inspection-and-local-copy-feedback",
     "portable-default-webview-config-and-database-paths",
     "native-window-and-live-state",
     "keyboard-tabs-focus-and-panel-agree",

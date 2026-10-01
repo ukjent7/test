@@ -18,7 +18,7 @@ function callRow(call) {
   row.querySelector('.routing-identity').textContent = call.routing ? `会话 ${call.routing.fingerprint} · ${call.routing.source}` : '路由身份未提供';
   const button = row.querySelector('.diff-button');
   button.dataset.callId = call.id;
-  button.textContent = `查看详情与差异 · 修补 ${call.request_changes} / ${call.response_changes}`;
+  button.title = `查看完整交换 · 请求修补 ${call.request_changes} / 响应修补 ${call.response_changes}`;
   button.setAttribute('aria-label', `查看差异 #${call.id}`);
   return row;
 }

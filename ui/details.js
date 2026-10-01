@@ -171,7 +171,7 @@ export function createDetails() {
     content.setAttribute('aria-busy', 'false');
     byId('copy-diff').disabled = true;
   });
-  byId('copy-diff').addEventListener('click', () => { if (detail) copy(JSON.stringify(detail, null, 2)); });
+  byId('copy-diff').addEventListener('click', event => { if (detail) copy(JSON.stringify(detail, null, 2), event.currentTarget); });
   byId('retry-diff').addEventListener('click', () => { if (currentId !== null) open(currentId); });
   return {open};
 }

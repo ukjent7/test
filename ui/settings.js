@@ -4,16 +4,32 @@ export function createSettings({getStatus, refresh, onSaved}) {
   const dialog = byId('settings-dialog');
   const form = byId('settings-form');
   let saving = false;
+  let scope = 'stepfun';
+  let opener;
 
   function proxyModeChanged() {
     const custom = byId('proxy-mode').value === 'custom';
     byId('proxy-address-field').hidden = !custom;
-    byId('proxy-address').required = custom;
+    byId('proxy-address').required = scope === 'network' && custom;
   }
 
-  function open(focus) {
+  function open(kind, focus, trigger) {
     const status = getStatus();
     if (!status || saving) return;
+    scope = kind;
+    opener = byId(trigger);
+    for (const name of ['stepfun', 'opencode', 'network']) {
+      byId(`${name}-fields`).hidden = name !== scope;
+    }
+    byId('upstream-input').required = scope === 'stepfun';
+    byId('opencode-input').required = scope === 'opencode';
+    byId('settings-title').textContent = {stepfun: 'StepFun', opencode: 'OpenCode Zen', network: '网络代理'}[scope];
+    byId('settings-hint').textContent = scope === 'network'
+      ? '系统模式读取系统代理或 HTTP_PROXY / HTTPS_PROXY 等环境设置。'
+      : `${scope === 'opencode' ? 'Zen 匿名访问可填 public；' : ''}配置上游密钥后，客户端无需提供密钥。`;
+    byId('settings-description').textContent = scope === 'network'
+      ? '设置连接方式，并选择需要通过代理的上游。'
+      : '保存后立即用于新请求。密钥留空保留已有值。';
     form.reset();
     byId('upstream-input').value = status.upstream_base_url;
     byId('opencode-input').value = status.opencode_base_url;
@@ -30,9 +46,9 @@ export function createSettings({getStatus, refresh, onSaved}) {
     byId(focus).focus();
   }
 
-  byId('edit-upstream').addEventListener('click', () => open('upstream-input'));
-  byId('edit-opencode').addEventListener('click', () => open('opencode-input'));
-  byId('edit-proxy').addEventListener('click', () => open('proxy-mode'));
+  byId('edit-upstream').addEventListener('click', () => open('stepfun', 'upstream-input', 'edit-upstream'));
+  byId('edit-opencode').addEventListener('click', () => open('opencode', 'opencode-input', 'edit-opencode'));
+  byId('edit-proxy').addEventListener('click', () => open('network', 'proxy-mode', 'edit-proxy'));
   byId('proxy-mode').addEventListener('change', proxyModeChanged);
   for (const id of ['close-settings', 'cancel-settings']) {
     byId(id).addEventListener('click', () => { if (!saving) dialog.close(); });
@@ -43,19 +59,20 @@ export function createSettings({getStatus, refresh, onSaved}) {
     byId('stepfun-key').value = '';
     byId('opencode-key').value = '';
     showError('settings-error');
+    opener?.focus();
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (saving) return;
     const settings = {
-      upstream_base_url: byId('upstream-input').value.trim(),
-      opencode_base_url: byId('opencode-input').value.trim(),
-      proxy: byId('proxy-mode').value === 'system' ? '' : byId('proxy-mode').value === 'direct' ? 'direct' : byId('proxy-address').value.trim(),
-      stepfun_use_proxy: byId('stepfun-use-proxy').checked,
-      opencode_use_proxy: byId('opencode-use-proxy').checked,
+      upstream_base_url: scope === 'stepfun' ? byId('upstream-input').value.trim() : getStatus().upstream_base_url,
     };
-    for (const [id, key] of [['stepfun-key', 'stepfun_api_key'], ['opencode-key', 'opencode_api_key']]) {
-      if (byId(id).value.trim()) settings[key] = byId(id).value.trim();
+    if (scope === 'network') {
+      settings.proxy = byId('proxy-mode').value === 'system' ? '' : byId('proxy-mode').value === 'direct' ? 'direct' : byId('proxy-address').value.trim();
+      for (const provider of ['stepfun', 'opencode']) settings[`${provider}_use_proxy`] = byId(`${provider}-use-proxy`).checked;
+    } else {
+      if (scope === 'opencode') settings.opencode_base_url = byId('opencode-input').value.trim();
+      if (byId(`${scope}-key`).value.trim()) settings[`${scope}_api_key`] = byId(`${scope}-key`).value.trim();
     }
     saving = true;
     form.setAttribute('aria-busy', 'true');
@@ -64,9 +81,9 @@ export function createSettings({getStatus, refresh, onSaved}) {
     showError('settings-error');
     try {
       await request('/ui/settings', settings);
-      onSaved();
+      if (scope !== 'network') onSaved();
       dialog.close();
-      notify('上游设置已保存');
+      notify('设置已保存');
       await refresh();
     } catch (error) {
       showError('settings-error', error.message);

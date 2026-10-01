@@ -1,4 +1,4 @@
-import {byId, copy, notify, request, showError} from './core.js';
+import {byId, copy, element, notify, providerName, request, showError} from './core.js';
 import {createSettings} from './settings.js';
 
 export function createGateway({getStatus, refresh}) {
@@ -9,24 +9,132 @@ export function createGateway({getStatus, refresh}) {
   let catalogLoaded = false;
   let modelRequest = null;
   let protocolChosen = false;
+  const trigger = byId('model-trigger');
+  const picker = byId('model-picker');
+  const search = byId('model-filter');
+  let highlighted = -1;
+  try {
+    selectedModel = localStorage.getItem('gateway.model') || '';
+    const protocol = localStorage.getItem('gateway.protocol');
+    if (['messages', 'chat_completions', 'responses'].includes(protocol)) {
+      byId('client-protocol').value = protocol;
+      protocolChosen = true;
+    }
+  } catch { /* Preferences are optional. */ }
+
+  function remember(key, value) {
+    try { localStorage.setItem(`gateway.${key}`, value); } catch { /* Keep the live selection. */ }
+  }
+
+  function closePicker(restoreFocus = false) {
+    picker.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    search.removeAttribute('aria-activedescendant');
+    if (restoreFocus) trigger.focus();
+  }
+
+  function choose(model) {
+    selectedModel = model;
+    remember('model', model);
+    closePicker(true);
+    renderModels();
+  }
+
+  function highlight(index) {
+    const options = [...byId('model-list').querySelectorAll('[role="option"]')];
+    highlighted = options.length ? (index + options.length) % options.length : -1;
+    options.forEach((option, position) => option.classList.toggle('highlighted', position === highlighted));
+    if (highlighted < 0) search.removeAttribute('aria-activedescendant');
+    else {
+      search.setAttribute('aria-activedescendant', options[highlighted].id);
+      options[highlighted].scrollIntoView({block: 'nearest'});
+    }
+  }
+
+  function openPicker() {
+    if (trigger.disabled) return;
+    search.value = '';
+    picker.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const box = trigger.getBoundingClientRect();
+    const width = Math.min(Math.max(box.width, 340), innerWidth - 24);
+    const below = innerHeight - box.bottom - 40;
+    const above = box.top - 12;
+    const placeBelow = below >= 200 || below >= above;
+    const height = Math.min(380, placeBelow ? below : above);
+    picker.style.width = `${width}px`;
+    picker.style.maxHeight = `${height}px`;
+    picker.style.left = `${Math.max(12, Math.min(box.left, innerWidth - width - 12))}px`;
+    picker.style.top = `${placeBelow ? box.bottom + 5 : Math.max(12, box.top - height - 5)}px`;
+    renderModels();
+    search.focus();
+  }
+  trigger.addEventListener('click', () => picker.hidden ? openPicker() : closePicker());
+  trigger.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openPicker();
+      highlight(event.key === 'ArrowDown' ? 0 : -1);
+    }
+  });
+  search.addEventListener('keydown', event => {
+    const options = [...byId('model-list').querySelectorAll('[role="option"]')];
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', 'Escape'].includes(event.key)) event.preventDefault();
+    if (event.key === 'ArrowDown') highlight(highlighted + 1);
+    if (event.key === 'ArrowUp') highlight(highlighted - 1);
+    if (event.key === 'Home') highlight(0);
+    if (event.key === 'End') highlight(options.length - 1);
+    if (event.key === 'Enter' && options[highlighted]) choose(options[highlighted].dataset.model);
+    if (event.key === 'Escape') closePicker(true);
+  });
+  picker.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); closePicker(true); }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!picker.hidden && !picker.contains(event.target) && !trigger.contains(event.target)) closePicker();
+  });
+  document.addEventListener('focusin', event => {
+    if (!picker.hidden && !picker.contains(event.target) && event.target !== trigger) closePicker();
+  });
+  window.addEventListener('resize', () => closePicker());
+  document.querySelector('main').addEventListener('scroll', () => closePicker());
 
   function connectionConfig() {
     const status = getStatus();
     if (!status) return;
-    const model = byId('model-select').value || selectedModel || 'stepfun/step-5-preview';
+    const model = selectedModel || 'stepfun/step-5-preview';
     if (!protocolChosen) byId('client-protocol').value = model.startsWith('opencode/') ? 'chat_completions' : 'messages';
     byId('config-example').textContent = `[model.gateway]\nmodel = ${JSON.stringify(model)}\nbase_url = ${JSON.stringify(status.endpoint)}\napi_key = ""\napi_backend = ${JSON.stringify(byId('client-protocol').value)}`;
   }
 
   function renderModels() {
-    const query = byId('model-filter').value.trim().toLowerCase();
+    const query = search.value.trim().toLowerCase();
     const visible = models.filter(model => model.id.toLowerCase().includes(query));
-    const select = byId('model-select');
-    select.replaceChildren(...visible.map(model => new Option(model.id, model.id)));
-    if (visible.some(model => model.id === selectedModel)) select.value = selectedModel;
-    if (!visible.length) select.add(new Option(catalogLoaded ? '没有符合条件的模型' : '拉取模型后选择', ''));
-    select.disabled = !visible.length || !!modelRequest;
-    byId('copy-model').disabled = !visible.length || !!modelRequest;
+    const list = byId('model-list');
+    list.replaceChildren();
+    let group = '';
+    for (const model of visible) {
+      const provider = model.id.split('/')[0];
+      if (provider !== group) {
+        list.append(element('div', 'model-group', providerName(provider)));
+        group = provider;
+      }
+      const option = element('button', '', model.id);
+      option.type = 'button';
+      option.id = `model-option-${models.indexOf(model)}`;
+      option.dataset.model = model.id;
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(model.id === selectedModel));
+      option.addEventListener('click', () => choose(model.id));
+      list.append(option);
+    }
+    if (!visible.length) list.append(element('p', 'empty-note', '没有符合条件的模型'));
+    highlighted = -1;
+    search.removeAttribute('aria-activedescendant');
+    trigger.textContent = selectedModel || (catalogLoaded ? '没有可用模型' : '拉取模型后选择');
+    trigger.title = selectedModel;
+    trigger.disabled = !models.length || !!modelRequest;
+    byId('copy-model').disabled = !models.some(model => model.id === selectedModel) || !!modelRequest;
     byId('model-count').textContent = catalogLoaded ? `${visible.length} / ${models.length} 个模型` : '尚未拉取';
     connectionConfig();
   }
@@ -34,8 +142,8 @@ export function createGateway({getStatus, refresh}) {
   function invalidateModels() {
     modelRequest?.abort();
     modelRequest = null;
+    closePicker();
     models = [];
-    selectedModel = '';
     catalogLoaded = false;
     byId('model-filter').value = '';
     byId('model-loading').hidden = true;
@@ -46,17 +154,14 @@ export function createGateway({getStatus, refresh}) {
 
   createSettings({getStatus, refresh, onSaved: invalidateModels});
   byId('model-filter').addEventListener('input', renderModels);
-  byId('model-select').addEventListener('change', () => {
-    selectedModel = byId('model-select').value;
-    connectionConfig();
-  });
   byId('client-protocol').addEventListener('change', () => {
     protocolChosen = true;
+    remember('protocol', byId('client-protocol').value);
     connectionConfig();
   });
-  byId('copy-endpoint').addEventListener('click', () => { if (getStatus()) copy(getStatus().endpoint); });
-  byId('copy-config').addEventListener('click', () => copy(byId('config-example').textContent));
-  byId('copy-model').addEventListener('click', () => copy(byId('model-select').value));
+  byId('copy-endpoint').addEventListener('click', event => { if (getStatus()) copy(getStatus().endpoint, event.currentTarget); });
+  byId('copy-config').addEventListener('click', event => copy(byId('config-example').textContent, event.currentTarget));
+  byId('copy-model').addEventListener('click', event => copy(selectedModel, event.currentTarget));
   byId('fetch-models').addEventListener('click', async () => {
     if (!connected || modelRequest) return;
     const controller = new AbortController();
@@ -69,6 +174,10 @@ export function createGateway({getStatus, refresh}) {
       const result = await request('/v1/models', undefined, {signal: controller.signal, timeout: 65000});
       if (controller.signal.aborted) return;
       models = result.data;
+      if (models.length && !models.some(model => model.id === selectedModel)) {
+        selectedModel = models[0].id;
+        remember('model', selectedModel);
+      }
       catalogLoaded = true;
       const warnings = result.upstream_errors.join('；');
       if (warnings) showError('model-error', warnings);
@@ -102,6 +211,7 @@ export function createGateway({getStatus, refresh}) {
     }
   });
 
+  renderModels();
   return {
     render(status, online) {
       connected = online;
@@ -118,7 +228,6 @@ export function createGateway({getStatus, refresh}) {
       byId('fetch-models').disabled = !online || !!modelRequest;
       if (!status) return;
       byId('enabled').setAttribute('aria-checked', String(status.enabled));
-      byId('local-address').textContent = status.endpoint.replace(/\/v1$/, '');
       byId('endpoint').textContent = status.endpoint;
       for (const [id, value] of [['upstream', status.upstream_base_url], ['opencode-upstream', status.opencode_base_url]]) {
         byId(id).textContent = value;

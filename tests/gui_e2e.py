@@ -1,6 +1,11 @@
 """Exercise the real GUI and gateway; run in GitHub Actions only.
 
 Frontend refactor failure scenarios, specified before implementation:
+- Primary connection/model/provider controls fall below the first desktop viewport.
+- Editing one provider exposes unrelated fields or Cancel loses the initiating focus.
+- Filtering silently changes the selected model; picker keyboard/dismissal is broken.
+- Reload loses the chosen model/protocol; copying has no feedback at the control.
+- A request cannot be inspected by keyboard or compact rows conceal required evidence.
 - Missing module assets or script errors leave the application uninitialized.
 - Tabs cannot be reached by keyboard, or focus and selected panel disagree.
 - Closing settings retains secret drafts; repeated saves or Escape interrupt a save.
@@ -170,6 +175,11 @@ def run(binary, output, test):
             "settings": str(settings_path), "database": str(database), "webview": str(output.resolve() / "webview")}, indent=2))
         passed("portable-default-webview-config-and-database-paths")
         passed("native-window-and-live-state")
+        for control in ["copy-endpoint", "model-trigger", "edit-upstream", "edit-opencode"]:
+            box = page.locator(f"#{control}").bounding_box()
+            assert box and box["y"] + box["height"] < page.evaluate("innerHeight - 28")
+        assert page.evaluate("document.documentElement.scrollHeight <= innerHeight")
+        passed("compact-shell-primary-controls-visible-without-scrolling")
         page.get_by_role("tab", name="网关", exact=True).focus()
         page.keyboard.press("ArrowRight")
         expect(page.get_by_role("tab", name="活动", exact=True)).to_be_focused()
@@ -183,6 +193,7 @@ def run(binary, output, test):
         passed("keyboard-tabs-focus-and-panel-agree")
         page.get_by_role("button", name="复制地址", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("已复制")
+        expect(page.locator("#copy-endpoint")).to_have_attribute("data-copied", "true")
         # WebView2 clipboard permissions are controlled by the host renderer.
         assert page.evaluate("navigator.clipboard.readText()") == address + "/v1"
         passed("copy-endpoint")
@@ -201,19 +212,33 @@ def run(binary, output, test):
         original_upstream = context.request.get(address + "/ui/status").json()["upstream_base_url"]
         page.get_by_role("button", name="编辑上游", exact=True).click()
         expect(page.get_by_label("OpenCode Zen 上游基地址", exact=True)).to_have_value("https://opencode.ai/zen/v1")
-        page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill("https://cancelled.example/v1")
+        expect(page.locator("#stepfun-fields")).to_be_visible()
+        expect(page.locator("#opencode-fields")).not_to_be_visible()
+        expect(page.locator("#network-fields")).not_to_be_visible()
+        page.get_by_label("StepFun 上游基地址", exact=True).fill("https://cancelled.example/v1")
         page.get_by_label("StepFun API key", exact=True).fill("DISCARDED_SECRET_DRAFT")
         page.get_by_role("button", name="取消", exact=True).click()
         expect(page.get_by_label("StepFun API key", exact=True)).to_have_value("")
         assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == original_upstream
         assert not settings_path.exists()
         passed("cancel-keeps-both-upstreams")
+        expect(page.locator("#edit-upstream")).to_be_focused()
+        page.get_by_role("button", name="编辑 OpenCode Zen", exact=True).click()
+        expect(page.locator("#opencode-fields")).to_be_visible()
+        expect(page.locator("#stepfun-fields")).not_to_be_visible()
+        page.get_by_role("button", name="取消", exact=True).click()
+        expect(page.locator("#edit-opencode")).to_be_focused()
+        passed("provider-editor-scoped-and-cancel-restores-focus")
         upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
         opencode_url = f"http://127.0.0.1:{upstream.server_port}/zen/v1"
         page.get_by_role("button", name="编辑上游", exact=True).click()
         page.get_by_label("StepFun 上游基地址", exact=True).fill(upstream_url)
-        page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill(opencode_url)
         page.get_by_label("StepFun API key", exact=True).fill("GUI_STEP_KEY")
+        page.screenshot(path=str(output / "stepfun-settings.png"))
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        page.get_by_role("button", name="编辑 OpenCode Zen", exact=True).click()
+        page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill(opencode_url)
         page.get_by_label("OpenCode Zen API key", exact=True).fill("GUI_ZEN_KEY")
         page.screenshot(path=str(output / "dual-upstream-settings.png"))
         page.get_by_role("button", name="保存", exact=True).click()
@@ -288,9 +313,16 @@ def run(binary, output, test):
         passed("proxy-defaults-provider-switches-validation-cancel-and-narrow-settings")
         page.get_by_role("button", name="拉取模型", exact=True).click()
         expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
-        assert page.locator("#model-select option").all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
+        def choose_model(model):
+            page.locator("#model-trigger").click()
+            page.get_by_role("option", name=model, exact=True).click()
+
+        page.locator("#model-trigger").click()
+        assert page.locator("#model-list [role=option]").all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
+        page.screenshot(path=str(output / "model-picker-open.png"))
+        page.keyboard.press("Escape")
         assert {call["authorization"] for call in model_calls} == {"Bearer GUI_STEP_KEY", "Bearer GUI_ZEN_KEY"}
-        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        choose_model("opencode/mimo-v2.5-free")
         page.get_by_role("button", name="复制模型 ID", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("已复制")
         assert page.evaluate("navigator.clipboard.readText()") == "opencode/mimo-v2.5-free"
@@ -299,17 +331,25 @@ def run(binary, output, test):
         assert "GUI_STEP_KEY" not in json.dumps(state) and "GUI_ZEN_KEY" not in json.dumps(state)
         (output / "models.json").write_text(json.dumps(context.request.get(address + "/v1/models").json(), indent=2))
         passed("configured-keys-private-model-fetch-and-copy")
+        page.locator("#model-trigger").click()
         page.get_by_label("筛选模型", exact=True).fill("STEPFUN")
-        expect(page.get_by_label("可用模型", exact=True)).to_have_value("stepfun/step-5-preview")
+        expect(page.get_by_label("可用模型", exact=True)).to_have_text("opencode/mimo-v2.5-free")
+        assert page.get_by_role("option").count() == 1
         page.get_by_label("筛选模型", exact=True).fill("no-model-matches")
-        expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_disabled()
+        assert page.get_by_role("option").count() == 0
+        expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
         page.get_by_label("筛选模型", exact=True).fill("")
-        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Enter")
+        expect(page.locator("#model-picker")).not_to_be_visible()
+        expect(page.locator("#model-trigger")).to_be_focused()
+        choose_model("opencode/mimo-v2.5-free")
+        passed("model-picker-keyboard-search-preserves-selection-and-dismisses")
         page.route("**/v1/models", lambda route: route.fulfill(status=502, content_type="application/json",
                    body=json.dumps({"error": {"message": "MODEL_REFRESH_FAILURE"}})))
         page.get_by_role("button", name="拉取模型", exact=True).click()
         expect(page.locator("#model-error")).to_contain_text("MODEL_REFRESH_FAILURE")
-        expect(page.get_by_label("可用模型", exact=True)).to_have_value("opencode/mimo-v2.5-free")
+        expect(page.get_by_label("可用模型", exact=True)).to_have_text("opencode/mimo-v2.5-free")
         expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
         page.unroute("**/v1/models")
         page.route("**/v1/models", lambda route: route.fulfill(content_type="application/json",
@@ -320,7 +360,7 @@ def run(binary, output, test):
         page.unroute("**/v1/models")
         page.get_by_role("button", name="拉取模型", exact=True).click()
         expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
-        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        choose_model("opencode/mimo-v2.5-free")
         page.get_by_label("接入协议", exact=True).select_option("responses")
         page.locator("#client-config").evaluate("element => element.open = true")
         page.get_by_role("button", name="复制配置", exact=True).click()
@@ -357,6 +397,15 @@ def run(binary, output, test):
         assert "PRIVATE_USER_MESSAGE" not in json.dumps(status)
         assert "PRIVATE_API_KEY" not in json.dumps(status)
         assert "PRIVATE_GUI_SESSION" not in json.dumps(status)
+        page.locator("#activity-list .call-context summary").first.click()
+        inspection = page.get_by_role("button", name=f"查看差异 #{status['calls'][0]['id']}", exact=True)
+        inspection.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#diff-dialog")).to_be_visible()
+        expect(page.get_by_test_id("diff-content")).to_contain_text("PRIVATE_USER_MESSAGE")
+        page.keyboard.press("Escape")
+        expect(inspection).to_be_focused()
+        passed("request-rows-keyboard-inspection-and-local-copy-feedback")
         expect(page.get_by_test_id("cache-usage").first).to_contain_text("缓存命中 70%")
         expect(page.get_by_test_id("cache-usage").first).to_contain_text("输入 1,000 · 读取 700 · 写入 200")
         expect(page.get_by_test_id("routing-identity").first).to_contain_text("x-grok-conv-id")
@@ -385,6 +434,9 @@ def run(binary, output, test):
         page.screenshot(path=str(output / "gateway-dark.png"))
         page.reload()
         expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+        expect(page.locator("#config-example")).to_contain_text('model = "opencode/mimo-v2.5-free"')
+        expect(page.get_by_label("接入协议", exact=True)).to_have_value("responses")
+        passed("client-model-and-protocol-preferences-survive-reload")
         page.get_by_role("button", name="切换主题", exact=True).click()
         page.screenshot(path=str(output / "gateway-light.png"))
         page.set_viewport_size({"width": 460, "height": 740})

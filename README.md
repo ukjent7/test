@@ -14,7 +14,7 @@ Rust 桌面网关，原生转发 Messages、Chat Completions 和 Responses，支
 
 ## 客户端接入
 
-在界面分别配置两边的上游地址与密钥，拉取模型列表后选择模型。默认上游为：
+在界面分别编辑两边的上游地址与密钥，拉取模型后通过搜索或方向键选择。首页可复制地址、模型 ID 和 Grok Build 配置；模型与协议选择会保留。默认上游为：
 
 - StepFun：`https://api.stepfun.ai/step_plan/v1`，模型使用 `stepfun/` 前缀；无前缀模型也走 StepFun。
 - OpenCode Zen：`https://opencode.ai/zen/v1`，模型使用 `opencode/` 前缀。

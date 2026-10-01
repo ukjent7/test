@@ -45,7 +45,11 @@ async function refresh() {
 }
 
 const tabs = [...document.querySelectorAll('[role="tab"]')];
+const scroller = document.querySelector('main');
+const scrollPositions = new Map();
 function activate(tab) {
+  const previous = tabs.find(other => other.getAttribute('aria-selected') === 'true');
+  if (previous) scrollPositions.set(previous.id, scroller.scrollTop);
   for (const other of tabs) {
     const selected = other === tab;
     other.setAttribute('aria-selected', String(selected));
@@ -53,6 +57,7 @@ function activate(tab) {
     byId(other.getAttribute('aria-controls')).hidden = !selected;
   }
   usage.activate(tab.getAttribute('aria-controls') === 'usage');
+  scroller.scrollTop = scrollPositions.get(tab.id) || 0;
 }
 for (const [index, tab] of tabs.entries()) {
   tab.addEventListener('click', () => activate(tab));

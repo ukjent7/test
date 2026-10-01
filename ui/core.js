@@ -51,9 +51,15 @@ export function notify(text) {
   toastTimer = setTimeout(() => { byId('toast').hidden = true; }, 2800);
 }
 
-export async function copy(text) {
+const copyTimers = new WeakMap();
+export async function copy(text, button) {
   try {
     await navigator.clipboard.writeText(text);
+    if (button) {
+      clearTimeout(copyTimers.get(button));
+      button.dataset.copied = 'true';
+      copyTimers.set(button, setTimeout(() => { delete button.dataset.copied; }, 1400));
+    }
     notify('已复制');
   } catch {
     notify('复制失败，请手动选择并复制内容');
