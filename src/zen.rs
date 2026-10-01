@@ -6,7 +6,7 @@ use std::{
 use axum::http::{HeaderMap, header};
 use serde_json::{Value, json};
 
-use crate::{ApiError, app::Change};
+use crate::{ApiError, app::Change, cache};
 
 pub fn is_zen(url: &reqwest::Url) -> bool {
     url.host_str() == Some("opencode.ai")
@@ -19,8 +19,12 @@ pub fn is_zen(url: &reqwest::Url) -> bool {
         )
 }
 
-pub fn prepare_headers(headers: &mut HeaderMap, request: &Value, anthropic: bool) {
-    let session = session_id(headers, request);
+pub fn prepare_headers(
+    headers: &mut HeaderMap,
+    request: &Value,
+    anthropic: bool,
+) -> (&'static str, String) {
+    let (source, session) = session_id(headers, request);
     let key = headers.get("x-api-key").cloned().or_else(|| {
         headers
             .get(header::AUTHORIZATION)?
@@ -59,6 +63,7 @@ pub fn prepare_headers(headers: &mut HeaderMap, request: &Value, anthropic: bool
     clean.insert(header::USER_AGENT, "opencode/1.18.31".parse().unwrap());
     clean.insert("x-opencode-session", session.parse().unwrap());
     *headers = clean;
+    (source, session)
 }
 
 pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> Option<Change> {
@@ -234,19 +239,9 @@ fn merge_delta(target: &mut Value, delta: &Value) {
     }
 }
 
-fn session_id(headers: &HeaderMap, request: &Value) -> String {
-    let signal = [
-        "x-opencode-session",
-        "x-session-affinity",
-        "x-session-id",
-        "conversation-id",
-    ]
-    .into_iter()
-    .filter_map(|name| headers.get(name)?.to_str().ok())
-    .chain(request["metadata"]["session_id"].as_str())
-    .chain(request["conversation_id"].as_str())
-    .find(|signal| !signal.is_empty());
-    if let Some(signal) = signal
+fn session_id(headers: &HeaderMap, request: &Value) -> (&'static str, String) {
+    let identity = cache::identity(headers, request);
+    if let Some((source, signal)) = identity
         && signal.len() == 30
         && signal.starts_with("ses_")
         && signal.as_bytes()[4..16]
@@ -256,7 +251,7 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
             .iter()
             .all(u8::is_ascii_alphanumeric)
     {
-        return signal.to_owned();
+        return (source, signal.to_owned());
     }
     let first_turn = request
         .get("messages")
@@ -272,7 +267,19 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
         .or_else(|| headers.get(header::AUTHORIZATION))
         .map(|key| key.as_bytes())
         .hash(&mut hash);
-    signal.unwrap_or(&first_turn).hash(&mut hash);
+    let (source, signal) = identity.unwrap_or((
+        if request
+            .get("messages")
+            .or_else(|| request.get("input"))
+            .is_some_and(Value::is_array)
+        {
+            "first_user_message"
+        } else {
+            "input"
+        },
+        &first_turn,
+    ));
+    signal.hash(&mut hash);
     let time = hash.finish() & 0xffff_ffff_ffff;
     "ses".hash(&mut hash);
     let mut random = hash.finish();
@@ -282,5 +289,8 @@ fn session_id(headers: &HeaderMap, request: &Value) -> String {
             [(random % 62) as usize];
         random /= 62;
     }
-    format!("ses_{time:012x}{}", std::str::from_utf8(&suffix).unwrap())
+    (
+        source,
+        format!("ses_{time:012x}{}", std::str::from_utf8(&suffix).unwrap()),
+    )
 }

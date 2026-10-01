@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod app;
+mod cache;
 mod desktop;
 mod zen;
 
@@ -76,8 +77,12 @@ async fn messages(
         &gateway,
         request["model"].as_str().unwrap_or("未知模型").to_owned(),
     );
-    let endpoint = uri.path().trim_start_matches("/v1").trim_start_matches('/');
-    let [stepfun, opencode] = gateway.upstreams(endpoint).inspect_err(|error| {
+    let endpoint = uri
+        .path()
+        .trim_start_matches("/v1")
+        .trim_start_matches('/')
+        .to_owned();
+    let [stepfun, opencode] = gateway.upstreams(&endpoint).inspect_err(|error| {
         trace.status = error.0.as_u16();
     })?;
     let model = request["model"].as_str().unwrap_or("").to_owned();
@@ -103,7 +108,10 @@ async fn messages(
     strip_hop_headers(&mut headers);
     configured_key(&mut headers, &key)?;
     if zen::is_zen(&url) {
-        zen::prepare_headers(&mut headers, &request, anthropic);
+        let (source, session) = zen::prepare_headers(&mut headers, &request, anthropic);
+        trace.record_routing(source, &session, &headers);
+    } else if let Some((source, identity)) = cache::identity(&headers, &request) {
+        trace.record_routing(source, identity, &headers);
     }
     headers.remove(header::HOST);
     headers.remove(header::CONTENT_LENGTH);
@@ -129,7 +137,7 @@ async fn messages(
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
         let free_error = serde_json::from_slice::<Value>(&bytes)
             .is_ok_and(|error| error["error"]["type"] == "FreeTierError");
-        if free_error && let Some(change) = zen::prepare_free_body(&mut request, endpoint) {
+        if free_error && let Some(change) = zen::prepare_free_body(&mut request, &endpoint) {
             trace.diff.request.push(change);
             collapse = !client_streaming;
             upstream = gateway
@@ -159,17 +167,14 @@ async fn messages(
             .bytes()
             .await
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
-        let value = zen::collapse(&bytes, endpoint)?;
+        let value = zen::collapse(&bytes, &endpoint)?;
+        trace.cache.observe(&endpoint, &value);
         headers.remove(header::CONTENT_LENGTH);
         headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
         trace.result = "完成";
         return Ok((status, headers, serde_json::to_vec(&value).unwrap()).into_response());
     }
-    if !status.is_success() || !anthropic {
-        let successful = status.is_success();
-        if successful {
-            trace.result = "取消";
-        }
+    if !status.is_success() {
         let stream = async_stream::stream! {
             let mut trace = trace;
             let mut stream = upstream.bytes_stream();
@@ -180,9 +185,6 @@ async fn messages(
                     return;
                 }
                 yield chunk;
-            }
-            if successful {
-                trace.result = "完成";
             }
         };
         let mut response = Response::new(Body::from_stream(stream));
@@ -221,7 +223,7 @@ async fn messages(
                     }
                     if blank {
                         frame_number += 1;
-                        let (output, changes) = normalize_sse(&frame, frame_number);
+                        let (output, changes) = normalize_sse(&frame, frame_number, &endpoint, &mut trace.cache);
                         trace.repairs += changes.len();
                         trace.diff.response.extend(changes);
                         yield Ok(Bytes::from(output));
@@ -230,7 +232,7 @@ async fn messages(
                 }
             }
             if !frame.is_empty() {
-                let (output, changes) = normalize_sse(&frame, frame_number + 1);
+                let (output, changes) = normalize_sse(&frame, frame_number + 1, &endpoint, &mut trace.cache);
                 trace.repairs += changes.len();
                 trace.diff.response.extend(changes);
                 yield Ok(Bytes::from(output));
@@ -239,20 +241,28 @@ async fn messages(
         };
         Body::from_stream(stream)
     } else {
-        let bytes = upstream
+        let mut bytes = upstream
             .bytes()
             .await
             .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
-        let mut value: Value = serde_json::from_slice(&bytes)
-            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.to_string()))?;
-        trace.diff.response = normalize_response(&mut value);
-        trace.repairs = trace.diff.response.len();
-        trace.result = "完成";
-        if trace.repairs > 0 {
-            Body::from(serde_json::to_vec(&value).unwrap())
-        } else {
-            Body::from(bytes)
+        match serde_json::from_slice::<Value>(&bytes) {
+            Ok(mut value) => {
+                trace.cache.observe(&endpoint, &value);
+                if anthropic {
+                    trace.diff.response = normalize_response(&mut value);
+                    trace.repairs = trace.diff.response.len();
+                    if trace.repairs > 0 {
+                        bytes = Bytes::from(serde_json::to_vec(&value).unwrap());
+                    }
+                }
+            }
+            Err(error) if anthropic => {
+                return Err(ApiError(StatusCode::BAD_GATEWAY, error.to_string()));
+            }
+            Err(_) => {}
         }
+        trace.result = "完成";
+        Body::from(bytes)
     };
     let mut response = Response::new(body);
     *response.status_mut() = status;
@@ -505,7 +515,12 @@ fn normalize_response(value: &mut Value) -> Vec<Change> {
     changes
 }
 
-fn normalize_sse(frame: &[u8], frame_number: usize) -> (Vec<u8>, Vec<Change>) {
+fn normalize_sse(
+    frame: &[u8],
+    frame_number: usize,
+    endpoint: &str,
+    usage: &mut cache::Usage,
+) -> (Vec<u8>, Vec<Change>) {
     let Ok(text) = std::str::from_utf8(frame) else {
         return (frame.to_vec(), Vec::new());
     };
@@ -520,6 +535,10 @@ fn normalize_sse(frame: &[u8], frame_number: usize) -> (Vec<u8>, Vec<Change>) {
     let Ok(mut value) = serde_json::from_str::<Value>(&data) else {
         return (frame.to_vec(), Vec::new());
     };
+    usage.observe(endpoint, &value);
+    if endpoint != "messages" {
+        return (frame.to_vec(), Vec::new());
+    }
     let mut changes = normalize_response(&mut value);
     if changes.is_empty() {
         return (frame.to_vec(), changes);

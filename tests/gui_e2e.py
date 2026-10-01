@@ -52,7 +52,13 @@ def run(binary, output):
                        "model": body["model"], "stop_reason": "end_turn",
                        "content": [{"type": "thinking", "thinking": "fixture reasoning"},
                                    {"type": "text", "text": "已连接"}],
-                       "usage": {"input_tokens": 8, "output_tokens": 4}}
+                       "usage": {"input_tokens": 100, "output_tokens": 4,
+                                 "cache_read_input_tokens": 700, "cache_creation_input_tokens": 200}}
+            if body["model"] == "cache-unknown":
+                message["usage"] = {"input_tokens": 100}
+            elif body["model"] == "cache-zero":
+                message["usage"] = {"input_tokens": 100, "cache_read_input_tokens": 0,
+                                    "cache_creation_input_tokens": 0}
             if body["model"] == "diff-json":
                 message["content"] = [
                     {"type": "thinking", "thinking": None, "signature": None},
@@ -208,7 +214,7 @@ def run(binary, output):
         request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
                         "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
         response = context.request.post(address + "/v1/messages", data=request_body,
-                                         headers={"Authorization": "Bearer PRIVATE_API_KEY"})
+                                         headers={"Authorization": "Bearer PRIVATE_API_KEY", "x-grok-conv-id": "PRIVATE_GUI_SESSION"})
         assert response.status == 200
         assert response.json()["content"][0]["signature"] == ""
         assert upstream_calls[-1]["path"] == "/step_plan/v1/messages"
@@ -219,6 +225,10 @@ def run(binary, output):
         status = context.request.get(address + "/ui/status").json()
         assert "PRIVATE_USER_MESSAGE" not in json.dumps(status)
         assert "PRIVATE_API_KEY" not in json.dumps(status)
+        assert "PRIVATE_GUI_SESSION" not in json.dumps(status)
+        expect(page.get_by_test_id("cache-usage").first).to_contain_text("缓存命中 70%")
+        expect(page.get_by_test_id("cache-usage").first).to_contain_text("输入 1,000 · 读取 700 · 写入 200")
+        expect(page.get_by_test_id("routing-identity").first).to_contain_text("x-grok-conv-id")
         (output / "request-status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
         page.screenshot(path=str(output / "activity-light.png"))
         passed("real-request-repair-and-private-activity")
@@ -252,6 +262,23 @@ def run(binary, output):
         passed("theme-persistence-and-small-window")
         page.set_viewport_size({"width": 760, "height": 760})
         page.get_by_role("tab", name="活动", exact=True).click()
+
+        for model, label in (("cache-zero", "缓存命中 0%"), ("cache-unknown", "缓存命中未报告")):
+            response = context.request.post(address + "/v1/messages", data={**request_body, "model": model})
+            assert response.status == 200
+            expect(page.get_by_test_id("activity-list")).to_contain_text(model)
+            expect(page.get_by_test_id("cache-usage").first).to_contain_text(label)
+        page.screenshot(path=str(output / "cache-activity-light.png"))
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        page.screenshot(path=str(output / "cache-activity-dark.png"))
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(output / "cache-activity-narrow.png"))
+        page.set_viewport_size({"width": 760, "height": 760})
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        (output / "cache-activity.json").write_text(json.dumps(context.request.get(address + "/ui/status").json(),
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        passed("cache-usage-zero-unknown-routing-and-themes")
 
         def latest_detail():
             calls = context.request.get(address + "/ui/status").json()["calls"]

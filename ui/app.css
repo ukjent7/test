@@ -94,6 +94,7 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .call+.call { border-top:1px solid var(--line); }
 .call .model { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:11px var(--code); }
 .call .time { color:var(--muted); font-size:10px; margin-top:4px; }
+.cache-usage,.routing-identity { color:var(--muted); font-size:10px; margin-top:4px; overflow-wrap:anywhere; }
 .call .duration,.call .repair { color:var(--secondary); font-size:10.5px; text-align:right; }
 .call .outcome { font-size:10px; padding:2px 7px; border-radius:5px; color:var(--green); background:var(--green-soft); text-align:center; }
 .call .outcome.failed { color:var(--red); background:var(--red-soft); }

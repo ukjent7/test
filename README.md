@@ -11,10 +11,15 @@ Rust 编写的桌面网关，支持 Messages、Chat Completions、Responses 的�
 - 拉取两个上游的模型列表，选择并复制带路由前缀的模型 ID。
 - 复制 Grok Build 接入地址或配置片段。
 - 查看本次运行请求数、修补数量、错误及最近 30 条请求。
+- 活动记录显示输入 token、缓存读取/写入、命中率及会话身份来源与指纹，区分明确为零和上游未报告。
 - 在活动记录中点击「查看差异」，分别查看请求和响应被修改的内容，红色表示修改前，绿色表示修改后；支持复制差异。
 - 切换并记住深浅主题。
 
 活动记录只存在于内存中，包含模型、HTTP 状态、耗时、修补数量和被修改的区块。差异可能包含无签名思考文本，不记录请求头、API key 或未修改的正文；最多保留最近 30 条，退出后清空。每秒状态轮询只传输摘要，点击记录时才读取差异。
+
+缓存观测覆盖三个协议的 JSON/SSE 及 Zen 免费层合并响应。Messages 的总输入为普通输入 + 缓存读取 + 缓存写入；Chat/Responses 的总输入直接使用上游 prompt_tokens / input_tokens，不重复加缓存。SSE 的累计字段更新已有值，省略的字段沿用先前报告；未报告缓存字段保留 null，明确报告 0 才显示零。Chat 兼容 DeepSeek prompt_cache_hit_tokens。观测不修改原生响应正文，不等待完整流才转发。
+
+状态接口每条记录新增 cache（input_tokens、cache_read_tokens、cache_write_tokens）与 routing（source、fingerprint）。指纹使用本次进程随机种子和实际上游凭证计算，不保存原始会话/缓存键；同一账户、相同身份在本次运行内可关联，重启后指纹改变，记录清空。Zen 指纹对应实际发送的 x-opencode-session；其它上游仅观察客户端提供的标识，未提供时显示身份缺失，不推测服务端是否支持该路由信号。
 
 请求差异展示无签名 thinking 转成 text、空思考块或空助手消息的删除；数组删除后同时展示原始和转发位置。响应差异展示补齐的 thinking/signature，区分「字段不存在」、`null` 和 `""`；SSE 标记帧编号、事件类型与 content block index。已有签名、工具调用等未修改内容不会被误报。此视图比较 JSON 内容，不展示空白、键顺序或 HTTP 传输头的变化。
 
@@ -92,7 +97,7 @@ $env:GATEWAY_LISTEN = "127.0.0.1:8789"
 
 在「编辑上游」中配置 Zen 地址和密钥，匿名免费模型可填 `public`。客户端模型填写 `opencode/<上游模型 ID>`，例如 `opencode/mimo-v2.5-free`；模型前缀在发往上游前删除，活动记录与请求 diff 保留路由证据。`stepfun/step-5-preview` 走 StepFun。没有自动故障切换，也不自动转换协议：据[官方 Zen 模型列表](https://opencode.ai/docs/en/zen/)，MiMo-V2.5 Free 使用 Chat Completions，客户端应选择该协议；Claude 模型使用 Messages，Responses 模型使用 Responses。正常 Chat/Responses 正文和响应原样透传，已有 thinking 修补仅作用于 Messages。
 
-仅当实际转发目标主机为 `opencode.ai`、路径为 `/zen/v1/messages`、`/zen/v1/chat/completions`、`/zen/v1/responses` 或 `/zen/v1/models` 时进行必要伪装。参照本地 `opencode2api`（`79a208a4679106c4643edb1efa1a5f79011e0a6e`）的 `internal/httpx/client.go`、`internal/identity/request.go` 与 `internal/gateway/upstream.go`，发送 `User-Agent: opencode/1.18.31` 和 `x-opencode-session`。会话格式采用 `ses_` + 12 小写十六进制字符 + 14 Base62 字符；合法 OpenCode 会话原样保留，其它会话标识在当前构建中确定性映射。优先使用 `x-opencode-session`、`x-session-affinity`、`x-session-id`、`conversation-id`、正文 `metadata.session_id` / `conversation_id`；没有标识时使用第一条用户消息或 Responses input，后续历史增长不改变会话。映射包含实际上游凭证以区分账户，结果仅用于路由关联，不是鉴权凭证。
+仅当实际转发目标主机为 `opencode.ai`、路径为 `/zen/v1/messages`、`/zen/v1/chat/completions`、`/zen/v1/responses` 或 `/zen/v1/models` 时进行必要伪装。参照本地 `opencode2api`（`79a208a4679106c4643edb1efa1a5f79011e0a6e`）的 `internal/httpx/client.go`、`internal/identity/request.go` 与 `internal/gateway/upstream.go`，发送 `User-Agent: opencode/1.18.31` 和 `x-opencode-session`。会话格式采用 `ses_` + 12 小写十六进制字符 + 14 Base62 字符；合法 OpenCode 会话原样保留，其它会话标识在当前构建中确定性映射。身份优先级为 `x-opencode-session`、`x-session-affinity`、`x-session-id`、`conversation-id`、pi 的 `session-id` / `session_id`、正文 `prompt_cache_key`、Grok 的 `x-grok-conv-id`、正文 `metadata.session_id` / `conversation_id`，跳过空标识。共享缓存键优先于 Grok 旁路的临时 conv ID；父会话 `x-grok-session-id` 和请求 ID 不参与路由，使独立旁路继续隔离。没有标识时使用第一条用户消息或 Responses input，后续历史增长不改变会话。映射包含实际上游凭证以区分账户，结果仅用于路由关联，不是鉴权凭证。
 
 Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropic-version` / `anthropic-beta`，版本缺失时补 `2023-06-01`；Chat/Responses/模型列表使用 Bearer 鉴权，不发送 Anthropic 头。设置 JSON Content-Type、JSON/SSE Accept 和 `Accept-Encoding: identity`，由 HTTP 客户端重算 Host 与 Content-Length。原客户端 User-Agent、Cookie、Forwarded、SDK 和追踪头全部清除。其它上游继续原有透传规则，配置密钥覆盖客户端凭证。
 
@@ -104,7 +109,7 @@ Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropi
 
 [最终线上接入验证](https://github.com/ukjent7/test/actions/runs/36792610882)：真实网关使用配置中的 public 密钥，客户端不带密钥，以 `opencode/mimo-v2.5-free` 发送普通非流式请求；网关修正免费层形态并返回 200 Chat JSON，内容为 OK。临时线上探测工作流已移除，常规 CI 继续使用本机夹具以保证回归可重复；历史探测可从对应 Actions 运行重放。
 
-CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单；GUI E2E 保存两个上游的设置、模型列表、密钥隐藏和重启持久化证据。
+CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单。缓存场景验证主请求 → 独立旁路 → 主请求、共享缓存旁路的实际会话 ID，以及已知用量夹具的 JSON/SSE 口径、累计字段更新、零与未报告、响应字节与首事件及时性；cache-identities.json 和 cache-observations.json 可重复核验。GUI E2E 保存两个上游的设置、模型列表、密钥隐藏、缓存记录的深浅色/窄窗口和重启持久化证据。夹具不会证明线上命中率已经提高。
 
 ## GitHub Actions 验证
 

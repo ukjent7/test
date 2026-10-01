@@ -54,6 +54,19 @@ function renderCalls(calls) {
     row.querySelector('.outcome').classList.toggle('failed', call.result === '失败');
     row.querySelector('.duration').textContent = `${call.duration_ms} ms`;
     row.querySelector('.repair').textContent = call.repairs ? `修补 ${call.repairs}` : '—';
+    const usage = document.createElement('div');
+    usage.className = 'cache-usage';
+    usage.dataset.testid = 'cache-usage';
+    const {input_tokens: input, cache_read_tokens: read, cache_write_tokens: write} = call.cache;
+    const tokens = value => value === null ? '未报告' : value.toLocaleString('zh-CN');
+    const hit = read === null ? '缓存命中未报告' : input > 0
+      ? `缓存命中 ${Math.round(read / input * 100)}%` : `缓存读取 ${tokens(read)}`;
+    usage.textContent = `${hit} · 输入 ${tokens(input)} · 读取 ${tokens(read)} · 写入 ${tokens(write)}`;
+    const routing = document.createElement('div');
+    routing.className = 'routing-identity';
+    routing.dataset.testid = 'routing-identity';
+    routing.textContent = call.routing ? `会话 ${call.routing.fingerprint} · ${call.routing.source}` : '路由身份未提供';
+    row.firstElementChild.append(usage, routing);
     const button = document.createElement('button');
     button.className = 'text-button diff-button';
     button.textContent = `查看差异 · 请求 ${call.request_changes} / 响应 ${call.response_changes}`;

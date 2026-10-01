@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     env, fs, io,
+    hash::{BuildHasher, RandomState},
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -18,7 +19,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ApiError, messages, models};
+use crate::{ApiError, cache, messages, models};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Settings {
@@ -55,6 +56,8 @@ struct Call {
     timestamp: u128,
     request_changes: usize,
     response_changes: usize,
+    routing: Option<cache::Routing>,
+    cache: cache::Usage,
     #[serde(skip_serializing)]
     diff: Diff,
 }
@@ -120,6 +123,7 @@ pub struct Gateway {
     pub control: Mutex<Control>,
     settings_path: PathBuf,
     listen: SocketAddr,
+    routing_hasher: RandomState,
 }
 
 pub struct Trace {
@@ -131,6 +135,8 @@ pub struct Trace {
     pub result: &'static str,
     pub repairs: usize,
     pub diff: Diff,
+    pub routing: Option<cache::Routing>,
+    pub cache: cache::Usage,
 }
 
 impl Trace {
@@ -147,7 +153,33 @@ impl Trace {
             result: "失败",
             repairs: 0,
             diff: Diff::default(),
+            routing: None,
+            cache: cache::Usage::default(),
         }
+    }
+
+    pub fn record_routing(
+        &mut self,
+        source: &'static str,
+        identity: &str,
+        headers: &axum::http::HeaderMap,
+    ) {
+        let key = headers
+            .get("x-api-key")
+            .and_then(|key| key.to_str().ok())
+            .or_else(|| {
+                headers
+                    .get(header::AUTHORIZATION)?
+                    .to_str()
+                    .ok()?
+                    .strip_prefix("Bearer ")
+            });
+        // A random process-local seed prevents guessing identities from public fingerprints.
+        let fingerprint = self.gateway.routing_hasher.hash_one((identity, key));
+        self.routing = Some(cache::Routing {
+            source,
+            fingerprint: format!("{fingerprint:016x}"),
+        });
     }
 }
 
@@ -170,6 +202,8 @@ impl Drop for Trace {
                 .as_millis(),
             request_changes: self.diff.request.len(),
             response_changes: self.diff.response.len(),
+            routing: self.routing.take(),
+            cache: std::mem::take(&mut self.cache),
             diff: std::mem::take(&mut self.diff),
         });
         control.calls.truncate(30);
@@ -295,6 +329,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         }),
         settings_path,
         listen,
+        routing_hasher: RandomState::new(),
     });
     let ui = Router::new()
         .route("/ui/status", get(status))
