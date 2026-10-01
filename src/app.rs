@@ -47,7 +47,7 @@ pub struct Stats {
 
 #[derive(Serialize)]
 struct Call {
-    id: u64,
+    id: i64,
     model: String,
     status: u16,
     result: &'static str,
@@ -116,7 +116,7 @@ pub struct Control {
     pub opencode_url: reqwest::Url,
     stats: Stats,
     history: history::History,
-    next_id: u64,
+    next_id: i64,
     history_error: Option<String>,
 }
 
@@ -130,7 +130,7 @@ pub struct Gateway {
 
 pub struct Trace {
     gateway: Arc<Gateway>,
-    id: u64,
+    id: i64,
     model: String,
     started: Instant,
     pub status: u16,
@@ -508,7 +508,7 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Result<Json<Value>, ApiE
 
 async fn call_diff(
     State(gateway): State<Arc<Gateway>>,
-    Path(id): Path<u64>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiError> {
     let control = gateway.control.lock().unwrap();
     let detail = control

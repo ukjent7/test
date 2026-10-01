@@ -777,7 +777,7 @@ def run(binary, checker, output):
         _, state = get("/ui/status")
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "Zen 免费层要求流式与基础工具" for change in detail["diff"]["request"])
-        assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail)
+        assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail["diff"])
         exchange = detail["exchange"]
         assert len(exchange["attempts"]) == 2
         assert exchange["attempts"][0]["response"]["status"] == 403

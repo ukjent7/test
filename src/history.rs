@@ -44,14 +44,14 @@ impl History {
         Ok(Self(connection))
     }
 
-    pub fn last_id(&self) -> rusqlite::Result<u64> {
+    pub fn last_id(&self) -> rusqlite::Result<i64> {
         self.0
             .query_row("SELECT coalesce(max(id), 0) FROM calls", [], |row| {
                 row.get(0)
             })
     }
 
-    pub fn save(&mut self, id: u64, summary: &Value, detail: &Value) -> rusqlite::Result<()> {
+    pub fn save(&mut self, id: i64, summary: &Value, detail: &Value) -> rusqlite::Result<()> {
         let transaction = self.0.transaction()?;
         transaction.execute(
             "INSERT INTO calls (id, summary, detail) VALUES (?1, ?2, ?3)",
@@ -71,7 +71,7 @@ impl History {
             .collect()
     }
 
-    pub fn detail(&self, id: u64) -> rusqlite::Result<Option<Value>> {
+    pub fn detail(&self, id: i64) -> rusqlite::Result<Option<Value>> {
         self.0
             .query_row("SELECT detail FROM calls WHERE id = ?1", [id], value)
             .optional()
