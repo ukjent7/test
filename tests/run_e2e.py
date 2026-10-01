@@ -14,10 +14,17 @@ import time
 from common import GROUPS, PLATFORM, ROOT, SUITES, check_report, seal, sha256, write_json, write_junit
 
 
-def kill_tree(process):
+def kill_tree(process, report_path):
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        # A gateway may start while taskkill enumerates the suite's descendants.
+        # After stopping the suite, its atomic checkpoint is the final PID list.
+        if report_path.exists():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            for child in report["processes"]:
+                subprocess.run(["taskkill", "/PID", str(child["pid"]), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -64,7 +71,7 @@ def run(args):
                     exit_code = process.wait(timeout=args.suite_timeout)
                 except subprocess.TimeoutExpired:
                     timed_out = True
-                    kill_tree(process)
+                    kill_tree(process, work / "report.json")
                     exit_code = process.returncode
             work.mkdir(exist_ok=True)
             report_path = work / "report.json"

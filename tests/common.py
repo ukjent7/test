@@ -101,7 +101,11 @@ def free_port():
 
 def stop_process(process, timeout=5):
     if process.poll() is None:
-        process.terminate()
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        else:
+            process.terminate()
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

@@ -4,6 +4,8 @@ Failure scenarios specified before the harness and CI implementation:
 Missing suites/cases, modified evidence, a different gateway, nonzero suite exits,
 stale output, startup failures, and timeouts must never produce a passing gate.
 One failed suite must not skip the others; partial reports and logs must survive.
+Windows shutdown must release WebView cache files; a timeout concurrent with
+gateway startup must kill every gateway recorded by the interrupted suite.
 """
 
 import csv
