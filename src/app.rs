@@ -383,7 +383,7 @@ fn network_clients(proxy: &str) -> Result<[reqwest::Client; 2], ApiError> {
         let url = reqwest::Url::parse(&address).map_err(|_| invalid())?;
         if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
             || url.host_str().is_none()
-            || (!proxy.contains("://") && url.port().is_none())
+            || (!proxy.contains("://") && !proxy.contains(':'))
         {
             return Err(invalid());
         }

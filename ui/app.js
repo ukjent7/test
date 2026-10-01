@@ -336,7 +336,7 @@ async function refresh() {
     byId('opencode-upstream').textContent = current.opencode_base_url;
     byId('opencode-upstream').title = current.opencode_base_url;
     const proxy = current.proxy === 'direct' ? '直连' : current.proxy ? '自定义代理' : '系统代理';
-    byId('proxy-status').textContent = `${proxy} · StepFun ${current.stepfun_use_proxy ? '使用代理' : '直连'} · Zen ${current.opencode_use_proxy ? '使用代理' : '直连'}`;
+    byId('proxy-status').textContent = `${proxy} · StepFun ${current.stepfun_use_proxy ? '跟随设置' : '直连'} · Zen ${current.opencode_use_proxy ? '跟随设置' : '直连'}`;
     byId('proxy-status').title = byId('proxy-status').textContent;
     byId('config-example').textContent = `base_url = "${current.endpoint}"\napi_backend = "messages"`;
     for (const field of ['requests', 'active', 'repairs', 'errors']) byId(field).textContent = current.stats[field];

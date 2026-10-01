@@ -3,7 +3,7 @@
 import argparse
 import base64
 import hashlib
-import http.client
+import http.client as http_client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -65,7 +65,7 @@ def run(binary, output):
             auth = self.headers.get("Proxy-Authorization")
             if self.server.require_auth:
                 assert auth == "Basic " + base64.b64encode(b"fixture:secret").decode(), auth
-            connection = http.client.HTTPConnection(host, upstream.server_port, timeout=10)
+            connection = http_client.HTTPConnection(host, upstream.server_port, timeout=10)
             try:
                 connection.request(self.command, target.path, body, headers)
                 response = connection.getresponse()
@@ -134,7 +134,7 @@ def run(binary, output):
     log = (output / "gateway.log").open("wb")
 
     def http(method, path, payload=None):
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+        connection = http_client.HTTPConnection("127.0.0.1", port, timeout=15)
         connection.request(method, path, json.dumps(payload) if payload is not None else None,
                            {"Content-Type": "application/json"})
         response = connection.getresponse()
