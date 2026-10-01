@@ -1,4 +1,16 @@
-"""Exercise the real GUI and gateway; run in GitHub Actions only."""
+"""Exercise the real GUI and gateway; run in GitHub Actions only.
+
+Frontend refactor failure scenarios, specified before implementation:
+- Missing module assets or script errors leave the application uninitialized.
+- Tabs cannot be reached by keyboard, or focus and selected panel disagree.
+- Closing settings retains secret drafts; repeated saves or Escape interrupt a save.
+- Model refresh failures erase the catalog; empty/filter results leave copy enabled.
+- Generated client configuration ignores the selected model or protocol.
+- A disconnected status leaves write controls enabled or cannot recover on refresh.
+- An older usage response overwrites a newly selected period.
+Existing cases cover themes, narrow layouts, literal diff content, clipboard,
+provider/proxy persistence, request filtering, and complete wire/history details.
+"""
 
 import argparse
 import hashlib
@@ -11,6 +23,7 @@ import socket
 import subprocess
 import threading
 import time
+import tomllib
 import urllib.request
 
 from playwright.sync_api import sync_playwright, expect
@@ -166,6 +179,8 @@ def run(binary, output):
             page.goto(address)
         context.tracing.start(screenshots=True, snapshots=True, sources=True)
         tracing = True
+        script_errors = []
+        page.on("pageerror", lambda error: script_errors.append(str(error)))
         expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
         expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
         expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
@@ -175,6 +190,17 @@ def run(binary, output):
             "settings": str(settings_path), "database": str(database), "webview": str(output.resolve() / "webview")}, indent=2))
         passed("portable-default-webview-config-and-database-paths")
         passed("native-window-and-live-state")
+        page.get_by_role("tab", name="网关", exact=True).focus()
+        page.keyboard.press("ArrowRight")
+        expect(page.get_by_role("tab", name="活动", exact=True)).to_be_focused()
+        expect(page.locator("#activity")).to_be_visible()
+        page.keyboard.press("End")
+        expect(page.get_by_role("tab", name="统计", exact=True)).to_be_focused()
+        expect(page.locator("#usage")).to_be_visible()
+        page.keyboard.press("Home")
+        expect(page.get_by_role("tab", name="网关", exact=True)).to_be_focused()
+        assert page.locator('[role="tab"][tabindex="0"]').count() == 1
+        passed("keyboard-tabs-focus-and-panel-agree")
         page.get_by_role("button", name="复制地址", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("已复制")
         # WebView2 clipboard permissions are controlled by the host renderer.
@@ -196,7 +222,9 @@ def run(binary, output):
         page.get_by_role("button", name="编辑上游", exact=True).click()
         expect(page.get_by_label("OpenCode Zen 上游基地址", exact=True)).to_have_value("https://opencode.ai/zen/v1")
         page.get_by_label("OpenCode Zen 上游基地址", exact=True).fill("https://cancelled.example/v1")
+        page.get_by_label("StepFun API key", exact=True).fill("DISCARDED_SECRET_DRAFT")
         page.get_by_role("button", name="取消", exact=True).click()
+        expect(page.get_by_label("StepFun API key", exact=True)).to_have_value("")
         assert context.request.get(address + "/ui/status").json()["upstream_base_url"] == original_upstream
         assert not settings_path.exists()
         passed("cancel-keeps-both-upstreams")
@@ -222,6 +250,21 @@ def run(binary, output):
         expect(page.get_by_role("dialog")).not_to_be_visible()
         saved = json.loads(settings_path.read_text())
         assert saved["stepfun_api_key"] == "GUI_STEP_KEY" and saved["opencode_api_key"] == "GUI_ZEN_KEY"
+        pending_saves = []
+        page.route("**/ui/settings", lambda route: pending_saves.append(route))
+        page.get_by_role("button", name="编辑上游", exact=True).click()
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("button", name="保存", exact=True)).to_be_disabled()
+        expect(page.get_by_label("StepFun 上游基地址", exact=True)).to_be_disabled()
+        page.keyboard.press("Escape")
+        expect(page.locator("#settings-dialog")).to_be_visible()
+        expect(page.get_by_role("button", name="取消", exact=True)).to_be_disabled()
+        assert len(pending_saves) == 1
+        pending_saves[0].continue_()
+        expect(page.locator("#settings-dialog")).not_to_be_visible()
+        page.unroute("**/ui/settings")
+        assert json.loads(settings_path.read_text()) == saved
+        passed("settings-drafts-cleared-and-pending-save-serialized")
         page.get_by_role("button", name="设置网络代理", exact=True).click()
         page.get_by_label("网络代理模式", exact=True).select_option("custom")
         expect(page.get_by_label("代理地址", exact=True)).to_be_visible()
@@ -276,6 +319,49 @@ def run(binary, output):
         assert "GUI_STEP_KEY" not in json.dumps(state) and "GUI_ZEN_KEY" not in json.dumps(state)
         (output / "models.json").write_text(json.dumps(context.request.get(address + "/v1/models").json(), indent=2))
         passed("configured-keys-private-model-fetch-and-copy")
+        page.get_by_label("筛选模型", exact=True).fill("STEPFUN")
+        expect(page.get_by_label("可用模型", exact=True)).to_have_value("stepfun/step-5-preview")
+        page.get_by_label("筛选模型", exact=True).fill("no-model-matches")
+        expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_disabled()
+        page.get_by_label("筛选模型", exact=True).fill("")
+        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        page.route("**/v1/models", lambda route: route.fulfill(status=502, content_type="application/json",
+                   body=json.dumps({"error": {"message": "MODEL_REFRESH_FAILURE"}})))
+        page.get_by_role("button", name="拉取模型", exact=True).click()
+        expect(page.locator("#model-error")).to_contain_text("MODEL_REFRESH_FAILURE")
+        expect(page.get_by_label("可用模型", exact=True)).to_have_value("opencode/mimo-v2.5-free")
+        expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
+        page.unroute("**/v1/models")
+        page.route("**/v1/models", lambda route: route.fulfill(content_type="application/json",
+                   body=json.dumps({"data": [], "upstream_errors": []})))
+        page.get_by_role("button", name="拉取模型", exact=True).click()
+        expect(page.get_by_label("可用模型", exact=True)).to_be_disabled()
+        expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_disabled()
+        page.unroute("**/v1/models")
+        page.get_by_role("button", name="拉取模型", exact=True).click()
+        expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
+        page.get_by_label("可用模型", exact=True).select_option("opencode/mimo-v2.5-free")
+        page.get_by_label("接入协议", exact=True).select_option("responses")
+        page.locator("#client-config").evaluate("element => element.open = true")
+        page.get_by_role("button", name="复制配置", exact=True).click()
+        configuration = page.evaluate("navigator.clipboard.readText()")
+        model_configuration = tomllib.loads(configuration)["model"]["gateway"]
+        assert model_configuration == {"model": "opencode/mimo-v2.5-free", "base_url": address + "/v1",
+                                       "api_key": "", "api_backend": "responses"}
+        (output / "client-config.txt").write_text(configuration, encoding="utf-8")
+        page.screenshot(path=str(output / "model-recovery-and-client-config.png"))
+        passed("model-search-refresh-failure-empty-recovery-and-client-config")
+        page.route("**/ui/status", lambda route: route.abort())
+        page.get_by_role("button", name="刷新状态", exact=True).click()
+        expect(page.get_by_test_id("gateway-state")).to_have_text("连接已断开")
+        expect(page.get_by_role("switch", name="网关转发", exact=True)).to_be_disabled()
+        expect(page.get_by_role("button", name="编辑上游", exact=True)).to_be_disabled()
+        page.screenshot(path=str(output / "connection-disconnected.png"))
+        page.unroute("**/ui/status")
+        page.get_by_role("button", name="刷新状态", exact=True).click()
+        expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
+        expect(page.get_by_role("button", name="编辑上游", exact=True)).to_be_enabled()
+        passed("connection-failure-disables-writes-and-manual-refresh-recovers")
         request_body = {"model": "step-5-preview", "max_tokens": 64, "stream": False,
                         "messages": [{"role": "user", "content": "PRIVATE_USER_MESSAGE"}]}
         response = context.request.post(address + "/v1/messages", data=request_body,
@@ -369,6 +455,33 @@ def run(binary, output):
         page.get_by_role("button", name="切换主题", exact=True).click()
         (output / "usage.json").write_text(json.dumps(context.request.get(address + "/ui/usage").json(), indent=2), encoding="utf-8")
         passed("usage-periods-three-levels-weighted-hit-rate-and-themes")
+        pending_usage = []
+        usage_fixture = context.request.get(address + "/ui/usage").json()
+        page.route("**/ui/usage?*", lambda route: pending_usage.append(route))
+        page.get_by_role("button", name="今天", exact=True).click()
+        expect(page.locator("#usage")).to_have_attribute("aria-busy", "true")
+        page.get_by_role("button", name="全部", exact=True).click()
+        expect(page.get_by_role("button", name="全部", exact=True)).to_have_attribute("aria-pressed", "true")
+        for _ in range(50):
+            if len(pending_usage) >= 2:
+                break
+            page.wait_for_timeout(20)
+        assert len(pending_usage) == 2
+        newest = json.loads(json.dumps(usage_fixture))
+        newest["total"]["requests"] = 222
+        pending_usage[1].fulfill(content_type="application/json", body=json.dumps(newest))
+        expect(page.get_by_test_id("usage-total")).to_contain_text("222")
+        oldest = json.loads(json.dumps(usage_fixture))
+        oldest["total"]["requests"] = 111
+        pending_usage[0].fulfill(content_type="application/json", body=json.dumps(oldest))
+        page.wait_for_timeout(100)
+        expect(page.get_by_test_id("usage-total")).not_to_contain_text("111")
+        page.unroute("**/ui/usage?*")
+        page.get_by_role("button", name="近 30 天", exact=True).click()
+        expect(page.get_by_test_id("usage-total")).to_contain_text("67.7%")
+        (output / "frontend-transitions.json").write_text(json.dumps({"pending_saves": len(pending_saves),
+            "period_requests": len(pending_usage), "client_config": model_configuration}, indent=2), encoding="utf-8")
+        passed("usage-latest-period-wins-over-out-of-order-responses")
         page.get_by_role("tab", name="活动", exact=True).click()
 
         def latest_detail():
@@ -524,6 +637,9 @@ def run(binary, output):
         retained = context.request.get(address + "/ui/status").json()["calls"]
         retained_usage = context.request.get(address + "/ui/usage").json()
         passed("byte-diff-whitespace-full-error-filter-and-copy")
+        assert script_errors == [], script_errors
+        (output / "script-errors.json").write_text(json.dumps(script_errors), encoding="utf-8")
+        passed("all-frontend-workflows-without-script-errors")
         context.tracing.stop(path=str(output / "gui-trace.zip"))
         tracing = False
         browser.close()

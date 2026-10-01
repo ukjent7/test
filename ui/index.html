@@ -4,137 +4,120 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Messages Gateway</title>
-  <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'; } catch {}</script>
   <link rel="stylesheet" href="app.css">
   <script src="byte-diff.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js" type="module"></script>
 </head>
 <body>
   <header class="top">
-    <div class="brand"><span class="mark" aria-hidden="true">m</span><h1>Messages Gateway</h1></div>
-    <nav class="segments" role="tablist" aria-label="页面">
-      <button role="tab" id="tab-gateway" aria-controls="gateway" aria-selected="true">网关</button>
-      <button role="tab" id="tab-activity" aria-controls="activity" aria-selected="false">活动</button>
-      <button role="tab" id="tab-usage" aria-controls="usage" aria-selected="false">统计</button>
-    </nav>
-    <button class="icon theme" id="theme" aria-label="切换主题" title="切换主题">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.2A7 7 0 0 1 7.8 3.8a7 7 0 1 0 8.4 8.4Z"/></svg>
-    </button>
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4"/></svg></span>
+      <div><h1>Messages Gateway</h1><p>模型服务，统一接入</p></div>
+    </div>
+    <div class="header-actions">
+      <button class="pill" id="refresh-status" aria-label="刷新状态" title="立即同步网关状态"><span class="refresh-icon" aria-hidden="true">↻</span>刷新状态</button>
+      <button class="icon" id="theme" aria-label="切换主题" aria-pressed="false" title="切换主题"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.2A7 7 0 0 1 7.8 3.8a7 7 0 1 0 8.4 8.4Z"/></svg></button>
+    </div>
   </header>
 
   <main>
+    <nav class="segments" role="tablist" aria-label="页面">
+      <button role="tab" id="tab-gateway" aria-controls="gateway" aria-selected="true" tabindex="0"><span class="tab-number" aria-hidden="true">01</span><span>网关</span><small aria-hidden="true">配置与接入</small></button>
+      <button role="tab" id="tab-activity" aria-controls="activity" aria-selected="false" tabindex="-1"><span class="tab-number" aria-hidden="true">02</span><span>活动</span><small aria-hidden="true">请求与差异</small></button>
+      <button role="tab" id="tab-usage" aria-controls="usage" aria-selected="false" tabindex="-1"><span class="tab-number" aria-hidden="true">03</span><span>统计</span><small aria-hidden="true">用量与缓存</small></button>
+    </nav>
+    <p class="connection-error" id="connection-error" role="alert" hidden></p>
+
     <section id="gateway" role="tabpanel" aria-labelledby="tab-gateway">
-      <div class="section-head"><h2>服务</h2><span class="subtle">本地运行 · 多上游</span></div>
-      <div class="list">
-        <div class="row status-row">
-          <span class="service-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/></svg></span>
-          <div class="grow"><strong>网关转发</strong><div class="secondary">连接 Grok Build 与模型服务</div></div>
-          <span class="state" data-testid="gateway-state" id="state">连接中</span>
-          <button class="switch" role="switch" aria-label="网关转发" aria-checked="false" id="enabled" disabled><span></span></button>
-        </div>
-        <div class="row"><span class="row-label">本地地址</span><code class="value" id="local-address">—</code><span class="tag">HTTP</span></div>
-        <div class="row"><span class="row-label">StepFun</span><code class="value" data-testid="upstream" id="upstream">—</code><button class="pill" id="edit-upstream" aria-label="编辑上游">编辑</button></div>
-        <div class="row"><span class="row-label">OpenCode</span><code class="value" data-testid="opencode-upstream" id="opencode-upstream">—</code><span class="tag">Zen</span></div>
-        <div class="row"><span class="row-label">网络代理</span><span class="value" id="proxy-status">系统代理</span><button class="pill" id="edit-proxy" aria-label="设置网络代理">设置</button></div>
+      <div class="page-heading"><div><h2>网关控制台</h2><p>管理转发服务，连接你的模型与客户端。</p></div><span class="eyebrow">LOCAL GATEWAY</span></div>
+      <div class="service-card card" id="service-card" data-state="connecting">
+        <div class="service-main"><div><div class="service-title"><h3>网关转发</h3><span class="state" data-testid="gateway-state" id="state">连接中</span></div><p id="service-description">正在读取本地服务状态…</p></div><button class="switch" role="switch" aria-label="网关转发" aria-checked="false" id="enabled" disabled><span></span></button></div>
+        <div class="service-address"><span>本地服务</span><code id="local-address">—</code><span class="tag">HTTP</span></div>
       </div>
-
       <div class="metrics" aria-label="本次运行统计">
-        <div><span>请求</span><strong data-testid="request-count" id="requests">0</strong></div>
-        <div><span>进行中</span><strong id="active">0</strong></div>
-        <div><span>兼容修补</span><strong data-testid="repair-count" id="repairs">0</strong></div>
-        <div><span>失败</span><strong id="errors">0</strong></div>
+        <div class="metric"><span>本次请求</span><strong data-testid="request-count" id="requests">0</strong></div>
+        <div class="metric"><span>进行中</span><strong id="active">0</strong></div>
+        <div class="metric"><span>兼容修补</span><strong data-testid="repair-count" id="repairs">0</strong></div>
+        <div class="metric"><span>失败请求</span><strong id="errors">0</strong></div>
       </div>
 
-      <div class="section-head"><h2>接入</h2><span class="subtle">按模型前缀选择上游</span></div>
-      <div class="list">
-        <div class="row connect-row">
-          <span class="agent-icon" aria-hidden="true">G</span>
-          <div class="grow"><strong>Grok Build</strong><div class="secondary">将模型的 base_url 指向此地址</div></div>
-          <span class="tag accent">3 种协议</span>
-        </div>
-        <div class="endpoint-row"><code data-testid="endpoint" id="endpoint">—</code><button class="pill" id="copy-endpoint" aria-label="复制地址">复制地址</button></div>
-        <details>
-          <summary>查看配置</summary>
-          <div class="config"><pre id="config-example"></pre><button class="text-button" id="copy-config">复制配置</button></div>
-          <p class="config-note">StepFun 使用 Messages；Zen 请按模型选择协议，然后重启 Grok Build。</p>
-        </details>
+      <div class="section-head"><h3>上游服务</h3><span class="subtle">模型前缀决定路由</span></div>
+      <div class="provider-grid">
+        <article class="card provider-card">
+          <div class="provider-heading"><span class="provider-mark" aria-hidden="true">S</span><div class="grow"><h4>StepFun</h4><code>stepfun/</code></div><button class="pill" id="edit-upstream" aria-label="编辑上游" disabled>编辑</button></div>
+          <code class="provider-url" data-testid="upstream" id="upstream">—</code>
+          <div class="provider-meta"><span id="stepfun-key-state">正在读取</span><span id="stepfun-proxy-state">—</span></div>
+        </article>
+        <article class="card provider-card">
+          <div class="provider-heading"><span class="provider-mark zen-mark" aria-hidden="true">Z</span><div class="grow"><h4>OpenCode Zen</h4><code>opencode/</code></div><button class="pill" id="edit-opencode" aria-label="编辑 OpenCode Zen" disabled>编辑</button></div>
+          <code class="provider-url" data-testid="opencode-upstream" id="opencode-upstream">—</code>
+          <div class="provider-meta"><span id="opencode-key-state">正在读取</span><span id="opencode-proxy-state">—</span></div>
+        </article>
       </div>
+      <div class="card proxy-row"><div class="grow"><strong>网络代理</strong><p id="proxy-status">系统代理</p></div><button class="pill" id="edit-proxy" aria-label="设置网络代理" disabled>设置</button></div>
 
-      <div class="section-head"><h2>兼容处理</h2></div>
-      <div class="list compatibility"><span class="check" aria-hidden="true">✓</span><div><strong>思考内容兼容</strong><p>自动补齐缺失字段，保留已有签名、工具调用与流式输出。</p></div><span class="tag success">已启用</span></div>
-      <div class="section-head"><h2>可用模型</h2><button class="pill" id="fetch-models">拉取模型</button></div>
-      <div class="list model-list">
-        <select id="model-select" aria-label="可用模型" disabled><option>先拉取模型列表</option></select>
-        <button class="pill" id="copy-model" disabled>复制模型 ID</button>
+      <div class="section-head"><h3>模型与客户端</h3><span class="subtle">先选模型，再复制接入配置</span></div>
+      <div class="card catalog-card">
+        <div class="card-heading"><div><h4>可用模型</h4><p id="model-count">尚未拉取</p></div><button class="pill" id="fetch-models" disabled>拉取模型</button></div>
+        <span class="loading" id="model-loading" hidden>正在读取上游模型列表…</span>
+        <div class="catalog-controls"><input id="model-filter" type="search" aria-label="筛选模型" placeholder="搜索模型名称或供应商" autocomplete="off"><select id="model-select" aria-label="可用模型" disabled><option value="">拉取模型后选择</option></select><button class="pill" id="copy-model" disabled>复制模型 ID</button></div>
+        <p class="field-error" id="model-error" role="alert" hidden></p>
       </div>
-      <p class="hint">模型前缀自动选择上游；客户端需使用对应的 Messages、Chat Completions 或 Responses 协议。</p>
-      <p class="field-error" id="model-error" role="alert" hidden></p>
-    </section>
-
-    <section id="usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
-      <div class="section-head"><h2>Token 用量与缓存</h2><span class="subtle">累计保存 · 自动刷新</span></div>
-      <div class="usage-periods" role="group" aria-label="统计时间范围">
-        <button class="pill" data-period="today" aria-pressed="false">今天</button>
-        <button class="pill" data-period="7d" aria-pressed="false">近 7 天</button>
-        <button class="pill" data-period="30d" aria-pressed="true">近 30 天</button>
-        <button class="pill" data-period="all" aria-pressed="false">全部</button>
+      <div class="card connect-card">
+        <div class="card-heading"><div><h4>客户端接入</h4><p>支持 Messages、Chat Completions 与 Responses</p></div><span class="tag accent">Grok Build</span></div>
+        <div class="endpoint-row"><code data-testid="endpoint" id="endpoint">—</code><button class="pill" id="copy-endpoint" aria-label="复制地址" disabled>复制地址</button></div>
+        <div class="protocol-row"><label for="client-protocol">接入协议</label><select id="client-protocol"><option value="messages">Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></div>
+        <details id="client-config"><summary>查看配置</summary><div class="config"><pre id="config-example"></pre><button class="text-button" id="copy-config" disabled>复制配置</button></div><p class="hint">写入 Grok Build 的 config.toml 后重启客户端。协议须与所选模型匹配。</p></details>
       </div>
-      <div class="section-head"><h2>总览</h2></div>
-      <div class="list usage-total" id="usage-total" data-testid="usage-total"></div>
-      <div class="section-head"><h2>供应商</h2></div>
-      <div class="list usage-table" id="usage-providers" data-testid="usage-providers"></div>
-      <div class="section-head"><h2>供应商 / 模型</h2></div>
-      <div class="list usage-table" id="usage-models" data-testid="usage-models"></div>
-      <p class="field-error" id="usage-error" role="alert" hidden></p>
-      <p class="privacy-note">按本地自然日统计。总 Token = 输入 + 输出；输入包含缓存读取与写入。命中率 = 已报告缓存用量的请求中，缓存读取 / 输入总量。未报告字段显示“未报告”，部分报告标明请求数。升级时纳入仍保留的历史记录；累计统计不受最近 100 条限制。</p>
+      <p class="compatibility"><span aria-hidden="true">✓</span>思考内容兼容已启用：补齐缺失字段，保留已有签名、工具调用与流式输出。</p>
     </section>
 
     <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
-      <div class="section-head"><h2>近期请求</h2><span class="subtle">最近 100 条 · 本机留存</span></div>
-      <div class="history-filter"><input id="call-filter" aria-label="筛选请求" placeholder="请求 ID、模型、状态码" type="search"><label><input id="errors-only" type="checkbox">仅错误</label></div>
-      <div class="list activity-list" data-testid="activity-list" id="activity-list">
-        <div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从 Grok Build 发送一条消息，它会出现在这里。</p></div>
-      </div>
+      <div class="page-heading"><div><h2>请求活动</h2><p>追踪完整交换，查看每一次兼容修补。</p></div><span class="eyebrow">最近 100 条</span></div>
+      <div class="card activity-toolbar"><div class="history-filter"><input id="call-filter" aria-label="筛选请求" placeholder="搜索请求 ID、模型或状态码" type="search"><label class="checkbox-label"><input id="errors-only" type="checkbox">仅错误</label></div><div class="filter-meta"><span id="call-count">0 / 0 条</span><button class="text-button" id="clear-filter" hidden>清除筛选</button><span class="subtle">自动同步</span></div></div>
+      <div class="card activity-list" data-testid="activity-list" id="activity-list"><div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从客户端发送一条消息，即可查看请求详情。</p></div></div>
       <p id="history-error" class="field-error" role="alert" hidden></p>
-      <p class="privacy-note">最近 100 条请求及完整正文保存在本机数据库，重启后可查。鉴权与 Cookie 隐藏原值；空白差异显式显示。未报告缓存用量不代表零命中。</p>
+      <p class="privacy-note">最近 100 条请求及完整正文保存在本机，重启后可查。鉴权与 Cookie 仅显示指纹；未报告缓存用量不代表零命中。</p>
+    </section>
+
+    <section id="usage" role="tabpanel" aria-labelledby="tab-usage" aria-busy="false" hidden>
+      <div class="page-heading"><div><h2>用量与缓存</h2><p>查看累计 Token 消耗与缓存效率。</p></div><span class="eyebrow">持续累计</span></div>
+      <div class="usage-toolbar"><div class="usage-periods" role="group" aria-label="统计时间范围"><button class="pill" data-period="today" aria-pressed="false">今天</button><button class="pill" data-period="7d" aria-pressed="false">近 7 天</button><button class="pill" data-period="30d" aria-pressed="true">近 30 天</button><button class="pill" data-period="all" aria-pressed="false">全部</button></div><span class="subtle" id="usage-updated">尚未同步</span></div>
+      <span class="loading" id="usage-loading" hidden>正在同步所选范围…</span>
+      <div class="section-head"><h3>总览</h3></div><div class="usage-total" id="usage-total" data-testid="usage-total"><p class="empty-note">正在读取累计用量…</p></div>
+      <div class="section-head"><h3>按供应商</h3></div><div class="card usage-table" id="usage-providers" data-testid="usage-providers" tabindex="0" aria-label="供应商用量，可横向滚动"></div>
+      <div class="section-head"><h3>按供应商与模型</h3></div><div class="card usage-table" id="usage-models" data-testid="usage-models" tabindex="0" aria-label="模型用量，可横向滚动"></div>
+      <div class="usage-error-row"><p class="field-error" id="usage-error" role="alert" hidden></p><button class="text-button" id="retry-usage">刷新用量</button></div>
+      <details class="help"><summary>统计口径与未报告字段</summary><p>按本地自然日统计。总 Token = 输入 + 输出，输入包含缓存读取与写入。命中率按已报告缓存的请求计算：缓存读取 / 输入总量。缺失字段显示“未报告”，部分报告标明请求数。累计用量不受最近 100 条限制。</p></details>
     </section>
   </main>
 
-  <footer><span class="footer-dot" id="footer-dot"></span><span id="connection">正在连接网关</span><span class="grow"></span><span id="version">v0.3.0</span></footer>
+  <footer><span class="footer-dot" id="footer-dot"></span><span id="connection">正在连接网关</span><span class="grow"></span><span class="sync-time">同步 <time id="last-updated">—</time></span><span id="version">—</span></footer>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+  <template id="call-template"><article class="call"><div class="call-main"><div class="model"></div><div class="time"></div><div class="cache-usage" data-testid="cache-usage"></div><div class="routing-identity" data-testid="routing-identity"></div><button class="text-button diff-button"></button></div><div class="call-tail"><span class="outcome"></span><span class="duration"></span><span class="repair"></span></div></article></template>
+
   <dialog id="diff-dialog" aria-labelledby="diff-title">
-    <div class="dialog-heading"><h2 id="diff-title">请求 / 响应差异</h2><button type="button" class="icon" id="close-diff" aria-label="关闭差异">×</button></div>
+    <div class="dialog-heading"><div><span class="eyebrow">REQUEST INSPECTOR</span><h2 id="diff-title">请求 / 响应差异</h2></div><button type="button" class="icon" id="close-diff" aria-label="关闭差异">×</button></div>
     <p class="dialog-description" id="diff-meta"></p>
     <div class="diff-legend"><span class="removed">− 修改前</span><span class="added">+ 修改后</span><span>空格 \u0020 · Tab \t · CR \r · LF \n</span></div>
-    <div id="diff-content" data-testid="diff-content"></div>
-    <div class="dialog-actions"><button type="button" class="pill" id="copy-diff" disabled>复制差异</button></div>
+    <div id="diff-content" data-testid="diff-content" aria-busy="false"></div>
+    <div class="dialog-actions"><button type="button" class="pill" id="retry-diff" hidden>重新读取</button><button type="button" class="primary" id="copy-diff" disabled>复制差异</button></div>
   </dialog>
 
   <dialog id="settings-dialog" aria-labelledby="settings-title">
-    <form id="settings-form">
-      <div class="dialog-heading"><h2 id="settings-title">上游与网络</h2><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
-      <p class="dialog-description">分别设置供应商的地址、密钥与代理开关。</p>
-      <label for="upstream-input">StepFun 上游基地址</label>
-      <input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1">
-      <label for="stepfun-key">StepFun API key</label>
-      <input type="password" id="stepfun-key" autocomplete="new-password">
-      <label class="proxy-toggle"><input type="checkbox" id="stepfun-use-proxy">StepFun 使用网络代理</label>
-      <label for="opencode-input">OpenCode Zen 上游基地址</label>
-      <input type="url" id="opencode-input" required spellcheck="false" autocomplete="off" placeholder="https://opencode.ai/zen/v1">
-      <label for="opencode-key">OpenCode Zen API key</label>
-      <input type="password" id="opencode-key" autocomplete="new-password">
-      <label class="proxy-toggle"><input type="checkbox" id="opencode-use-proxy">OpenCode Zen 使用网络代理</label>
-      <label for="proxy-mode">网络代理模式</label>
-      <select id="proxy-mode"><option value="system">系统代理（默认）</option><option value="direct">直连</option><option value="custom">自定义代理</option></select>
-      <div id="proxy-address-field" hidden>
-        <label for="proxy-address">代理地址</label>
-        <input type="text" id="proxy-address" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080">
+    <form id="settings-form" aria-busy="false">
+      <div class="dialog-heading"><div><span class="eyebrow">CONNECTION SETTINGS</span><h2 id="settings-title">上游与网络</h2></div><button type="button" class="icon" id="close-settings" aria-label="关闭设置">×</button></div>
+      <p class="dialog-description">保存后立即用于新请求。密钥留空保留已有值。</p>
+      <div class="settings-grid">
+        <fieldset><legend>StepFun</legend><label for="upstream-input">StepFun 上游基地址</label><input type="url" id="upstream-input" required spellcheck="false" autocomplete="off" placeholder="https://api.stepfun.ai/step_plan/v1"><label for="stepfun-key">StepFun API key</label><input type="password" id="stepfun-key" autocomplete="new-password"><label class="checkbox-label proxy-toggle"><input type="checkbox" id="stepfun-use-proxy">StepFun 使用网络代理</label></fieldset>
+        <fieldset><legend>OpenCode Zen</legend><label for="opencode-input">OpenCode Zen 上游基地址</label><input type="url" id="opencode-input" required spellcheck="false" autocomplete="off" placeholder="https://opencode.ai/zen/v1"><label for="opencode-key">OpenCode Zen API key</label><input type="password" id="opencode-key" autocomplete="new-password"><label class="checkbox-label proxy-toggle"><input type="checkbox" id="opencode-use-proxy">OpenCode Zen 使用网络代理</label></fieldset>
       </div>
-      <p class="hint">供应商开关开启时使用以上代理模式，关闭时直连；适用于请求转发和模型列表。系统模式读取系统或 HTTP_PROXY / HTTPS_PROXY 等环境设置；本地回环地址始终直连。</p>
-      <p class="hint">密钥留空保留已保存值，匿名 Zen 可填 public。配置密钥后客户端无需提供密钥；保存后用于新请求。</p>
+      <fieldset class="network-settings"><legend>网络代理</legend><label for="proxy-mode">网络代理模式</label><select id="proxy-mode"><option value="system">系统代理（默认）</option><option value="direct">直连</option><option value="custom">自定义代理</option></select><div id="proxy-address-field" hidden><label for="proxy-address">代理地址</label><input type="text" id="proxy-address" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"></div><p class="hint">供应商开关开启时跟随上述模式，关闭时直连；适用于请求与模型列表。本地回环地址始终直连。</p></fieldset>
+      <p class="hint">系统模式读取系统或 HTTP_PROXY / HTTPS_PROXY 等环境设置。Zen 匿名访问可填 public；已配置密钥时，客户端无需提供密钥。</p>
       <p class="field-error" data-testid="settings-error" id="settings-error" role="alert" hidden></p>
-      <div class="dialog-actions"><button type="button" class="pill" id="cancel-settings">取消</button><button type="submit" class="primary" id="save-settings">保存</button></div>
+      <div class="dialog-actions"><span class="loading grow" id="save-progress" hidden>正在保存…</span><button type="button" class="pill" id="cancel-settings">取消</button><button type="submit" class="primary" id="save-settings">保存</button></div>
     </form>
   </dialog>
 </body>

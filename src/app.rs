@@ -148,6 +148,28 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         .route("/ui/settings", post(update_settings))
         .route("/ui/enabled", post(set_enabled))
         .layer(middleware::from_fn(local_control));
+    let mut assets = Router::new();
+    for (path, source) in [
+        ("/app.css", include_str!("../ui/app.css")),
+        ("/app.js", include_str!("../ui/app.js")),
+        ("/core.js", include_str!("../ui/core.js")),
+        ("/gateway.js", include_str!("../ui/gateway.js")),
+        ("/settings.js", include_str!("../ui/settings.js")),
+        ("/activity.js", include_str!("../ui/activity.js")),
+        ("/details.js", include_str!("../ui/details.js")),
+        ("/usage.js", include_str!("../ui/usage.js")),
+        ("/byte-diff.js", include_str!("../ui/byte-diff.js")),
+    ] {
+        let content_type = if path.ends_with(".css") {
+            "text/css; charset=utf-8"
+        } else {
+            "text/javascript; charset=utf-8"
+        };
+        assets = assets.route(
+            path,
+            get(move || async move { ([(header::CONTENT_TYPE, content_type)], source) }),
+        );
+    }
     let app = Router::new()
         .route("/v1/messages", post(forwarding::messages))
         .route("/messages", post(forwarding::messages))
@@ -162,33 +184,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
             "/",
             get(|| async { Html(include_str!("../ui/index.html")) }),
         )
-        .route(
-            "/app.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../ui/app.css"),
-                )
-            }),
-        )
-        .route(
-            "/byte-diff.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../ui/byte-diff.js"),
-                )
-            }),
-        )
-        .route(
-            "/app.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../ui/app.js"),
-                )
-            }),
-        )
+        .merge(assets)
         .merge(ui)
         .layer(DefaultBodyLimit::disable())
         .with_state(gateway);
