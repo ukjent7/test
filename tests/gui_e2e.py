@@ -334,9 +334,9 @@ def run(binary, output, test):
         page.locator("#model-trigger").click()
         page.get_by_label("筛选模型", exact=True).fill("STEPFUN")
         expect(page.get_by_label("可用模型", exact=True)).to_have_text("opencode/mimo-v2.5-free")
-        assert page.get_by_role("option").count() == 1
+        expect(page.locator('#model-list [role="option"]')).to_have_count(1)
         page.get_by_label("筛选模型", exact=True).fill("no-model-matches")
-        assert page.get_by_role("option").count() == 0
+        expect(page.locator('#model-list [role="option"]')).to_have_count(0)
         expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
         page.get_by_label("筛选模型", exact=True).fill("")
         page.keyboard.press("ArrowDown")
