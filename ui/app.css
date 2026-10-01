@@ -144,6 +144,10 @@ footer { position:fixed; bottom:0; left:0; right:0; height:37px; display:flex; a
 .toast { position:fixed; left:50%; bottom:53px; transform:translateX(-50%); background:var(--fg); color:var(--card); border-radius:8px; padding:9px 16px; font-size:11px; box-shadow:0 4px 20px #0002; max-width:calc(100% - 32px); }
 dialog { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:14px; padding:24px; width:min(460px,calc(100% - 36px)); box-shadow:0 20px 80px #0003; }
 dialog::backdrop { background:#0004; }
+#settings-dialog { max-height:calc(100% - 36px); overflow-y:auto; }
+.proxy-toggle { display:flex; align-items:center; gap:7px; margin:10px 0 15px; }
+.proxy-toggle input { width:auto; }
+#proxy-address-field label { margin-top:12px; }
 .dialog-heading { display:flex; align-items:center; justify-content:space-between; }
 .dialog-heading h2 { font-size:15px; font-weight:600; }
 .dialog-description { color:var(--muted); font-size:11px; margin:8px 0 22px; }

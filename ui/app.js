@@ -335,6 +335,9 @@ async function refresh() {
     byId('upstream').title = current.upstream_base_url;
     byId('opencode-upstream').textContent = current.opencode_base_url;
     byId('opencode-upstream').title = current.opencode_base_url;
+    const proxy = current.proxy === 'direct' ? '直连' : current.proxy ? '自定义代理' : '系统代理';
+    byId('proxy-status').textContent = `${proxy} · StepFun ${current.stepfun_use_proxy ? '使用代理' : '直连'} · Zen ${current.opencode_use_proxy ? '使用代理' : '直连'}`;
+    byId('proxy-status').title = byId('proxy-status').textContent;
     byId('config-example').textContent = `base_url = "${current.endpoint}"\napi_backend = "messages"`;
     for (const field of ['requests', 'active', 'repairs', 'errors']) byId(field).textContent = current.stats[field];
     byId('version').textContent = `v${current.version}`;
@@ -378,6 +381,11 @@ byId('edit-upstream').addEventListener('click', () => {
   if (!current) return;
   byId('upstream-input').value = current.upstream_base_url;
   byId('opencode-input').value = current.opencode_base_url;
+  byId('proxy-mode').value = current.proxy === 'direct' ? 'direct' : current.proxy ? 'custom' : 'system';
+  byId('proxy-address').value = ['', 'direct'].includes(current.proxy) ? '' : current.proxy;
+  byId('stepfun-use-proxy').checked = current.stepfun_use_proxy;
+  byId('opencode-use-proxy').checked = current.opencode_use_proxy;
+  proxyModeChanged();
   for (const [id, configured] of [['stepfun-key', current.stepfun_key_configured], ['opencode-key', current.opencode_key_configured]]) {
     byId(id).value = '';
     byId(id).placeholder = configured ? '已设置，留空保留' : '未设置';
@@ -385,6 +393,13 @@ byId('edit-upstream').addEventListener('click', () => {
   byId('settings-error').hidden = true;
   dialog.showModal();
 });
+byId('edit-proxy').addEventListener('click', () => byId('edit-upstream').click());
+function proxyModeChanged() {
+  const custom = byId('proxy-mode').value === 'custom';
+  byId('proxy-address-field').hidden = !custom;
+  byId('proxy-address').required = custom;
+}
+byId('proxy-mode').addEventListener('change', proxyModeChanged);
 byId('close-settings').addEventListener('click', () => dialog.close());
 byId('cancel-settings').addEventListener('click', () => dialog.close());
 byId('settings-form').addEventListener('submit', async event => {
@@ -393,6 +408,9 @@ byId('settings-form').addEventListener('submit', async event => {
   byId('settings-error').hidden = true;
   try {
     const settings = {upstream_base_url: byId('upstream-input').value, opencode_base_url: byId('opencode-input').value};
+    settings.proxy = byId('proxy-mode').value === 'system' ? '' : byId('proxy-mode').value === 'direct' ? 'direct' : byId('proxy-address').value.trim();
+    settings.stepfun_use_proxy = byId('stepfun-use-proxy').checked;
+    settings.opencode_use_proxy = byId('opencode-use-proxy').checked;
     for (const [id, key] of [['stepfun-key', 'stepfun_api_key'], ['opencode-key', 'opencode_api_key']]) {
       if (byId(id).value.trim()) settings[key] = byId(id).value.trim();
     }

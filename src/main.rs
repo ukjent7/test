@@ -134,7 +134,7 @@ async fn forward(
     } else {
         (stepfun, model.strip_prefix("stepfun/").unwrap_or(&model))
     };
-    let (mut url, key) = upstream;
+    let (mut url, key, client) = upstream;
     let anthropic = endpoint == "messages";
     if anthropic {
         trace.diff.request = normalize_history(&mut request);
@@ -162,7 +162,7 @@ async fn forward(
     url.set_query(uri.query());
     let client_streaming = request["stream"].as_bool().unwrap_or(false);
     let mut collapse = false;
-    let mut upstream = send_upstream(gateway, &url, &headers, &request, trace).await?;
+    let mut upstream = send_upstream(&client, &url, &headers, &request, trace).await?;
     if !anthropic && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
         trace.status = 403;
         let mut original_headers = upstream.headers().clone();
@@ -173,7 +173,7 @@ async fn forward(
         if free_error && let Some(change) = zen::prepare_free_body(&mut request, &endpoint) {
             trace.diff.request.push(change);
             collapse = !client_streaming;
-            upstream = send_upstream(gateway, &url, &headers, &request, trace).await?;
+            upstream = send_upstream(&client, &url, &headers, &request, trace).await?;
         } else {
             return Ok((StatusCode::FORBIDDEN, original_headers, bytes).into_response());
         }
@@ -316,15 +316,14 @@ async fn forward(
 }
 
 async fn send_upstream(
-    gateway: &Gateway,
+    client: &reqwest::Client,
     url: &reqwest::Url,
     headers: &HeaderMap,
     body: &Value,
     trace: &mut Trace,
 ) -> Result<reqwest::Response, ApiError> {
     let bytes = serde_json::to_vec(body).unwrap();
-    let mut request = gateway
-        .client
+    let mut request = client
         .post(url.clone())
         .headers(headers.clone())
         .body(bytes.clone())
@@ -350,8 +349,7 @@ async fn send_upstream(
         request: trace.snapshot(url.to_string(), None, request.headers(), bytes, true),
         response: None,
     });
-    let response = gateway
-        .client
+    let response = client
         .execute(request)
         .await
         .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
@@ -399,8 +397,8 @@ async fn models(
 ) -> Result<Json<Value>, ApiError> {
     let [stepfun, opencode] = gateway.upstreams("models")?;
     let (stepfun, opencode) = futures_util::future::join(
-        fetch_models(&gateway.client, stepfun, headers.clone()),
-        fetch_models(&gateway.client, opencode, headers),
+        fetch_models(stepfun, headers.clone()),
+        fetch_models(opencode, headers),
     )
     .await;
     let mut data = Vec::new();
@@ -429,8 +427,7 @@ async fn models(
 }
 
 async fn fetch_models(
-    client: &reqwest::Client,
-    (url, key): (reqwest::Url, String),
+    (url, key, client): (reqwest::Url, String, reqwest::Client),
     mut headers: HeaderMap,
 ) -> Result<Vec<Value>, ApiError> {
     strip_hop_headers(&mut headers);

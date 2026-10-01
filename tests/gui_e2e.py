@@ -181,6 +181,9 @@ def run(binary, output):
         assert page.evaluate("navigator.clipboard.readText()") == address + "/v1"
         passed("copy-endpoint")
         page.get_by_role("button", name="编辑上游", exact=True).click()
+        expect(page.get_by_label("网络代理模式", exact=True)).to_have_value("system")
+        expect(page.get_by_label("StepFun 使用网络代理", exact=True)).to_be_checked()
+        expect(page.get_by_label("OpenCode Zen 使用网络代理", exact=True)).to_be_checked()
         page.get_by_label("StepFun 上游基地址", exact=True).fill("file:///invalid")
         page.get_by_role("button", name="保存", exact=True).click()
         expect(page.get_by_test_id("settings-error")).to_be_visible()
@@ -219,6 +222,47 @@ def run(binary, output):
         expect(page.get_by_role("dialog")).not_to_be_visible()
         saved = json.loads(settings_path.read_text())
         assert saved["stepfun_api_key"] == "GUI_STEP_KEY" and saved["opencode_api_key"] == "GUI_ZEN_KEY"
+        page.get_by_role("button", name="设置网络代理", exact=True).click()
+        page.get_by_label("网络代理模式", exact=True).select_option("custom")
+        expect(page.get_by_label("代理地址", exact=True)).to_be_visible()
+        page.get_by_label("代理地址", exact=True).fill("http://127.0.0.1:1")
+        page.get_by_label("StepFun 使用网络代理", exact=True).uncheck()
+        page.screenshot(path=str(output / "proxy-settings-light.png"))
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        expect(page.locator("#proxy-status")).to_contain_text("自定义代理 · StepFun 直连")
+        proxy_saved = json.loads(settings_path.read_text())
+        assert proxy_saved["proxy"] == "http://127.0.0.1:1" and not proxy_saved["stepfun_use_proxy"] and proxy_saved["opencode_use_proxy"]
+        page.get_by_role("button", name="设置网络代理", exact=True).click()
+        expect(page.get_by_label("网络代理模式", exact=True)).to_have_value("custom")
+        expect(page.get_by_label("代理地址", exact=True)).to_have_value("http://127.0.0.1:1")
+        expect(page.get_by_label("StepFun 使用网络代理", exact=True)).not_to_be_checked()
+        page.get_by_label("代理地址", exact=True).fill("file:///invalid")
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_test_id("settings-error")).to_contain_text("代理地址须使用")
+        assert json.loads(settings_path.read_text()) == proxy_saved
+        page.get_by_label("代理地址", exact=True).fill("socks5://127.0.0.1:1080")
+        page.evaluate("document.documentElement.dataset.theme = 'dark'")
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.querySelector('#settings-dialog').scrollWidth <= document.querySelector('#settings-dialog').clientWidth")
+        page.screenshot(path=str(output / "proxy-settings-dark-narrow.png"))
+        page.get_by_role("button", name="取消", exact=True).click()
+        assert json.loads(settings_path.read_text()) == proxy_saved
+        page.set_viewport_size({"width": 760, "height": 760})
+        page.evaluate("document.documentElement.dataset.theme = 'light'")
+        page.get_by_role("button", name="设置网络代理", exact=True).click()
+        page.get_by_label("网络代理模式", exact=True).select_option("direct")
+        expect(page.get_by_label("代理地址", exact=True)).not_to_be_visible()
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        assert json.loads(settings_path.read_text())["proxy"] == "direct"
+        page.get_by_role("button", name="设置网络代理", exact=True).click()
+        page.get_by_label("网络代理模式", exact=True).select_option("system")
+        page.get_by_label("StepFun 使用网络代理", exact=True).check()
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_role("dialog")).not_to_be_visible()
+        assert json.loads(settings_path.read_text())["proxy"] == ""
+        passed("proxy-defaults-provider-switches-validation-cancel-and-narrow-settings")
         page.get_by_role("button", name="拉取模型", exact=True).click()
         expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
         assert page.locator("#model-select option").all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
@@ -495,6 +539,7 @@ def run(binary, output):
         assert restarted["upstream_base_url"] == upstream_url
         assert restarted["opencode_base_url"] == opencode_url
         assert restarted["stepfun_key_configured"] and restarted["opencode_key_configured"]
+        assert restarted["proxy"] == "" and restarted["stepfun_use_proxy"] and restarted["opencode_use_proxy"]
         assert restarted["calls"] == retained, "request history must survive restart"
         with urllib.request.urlopen(address + "/ui/usage") as response:
             assert json.load(response) == retained_usage

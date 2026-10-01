@@ -43,6 +43,8 @@ api_backend = "chat_completions"
 
 设置保存后立即用于新请求。界面密钥框留空会保留已有密钥。默认数据跟随可执行文件目录，不随启动工作目录变化，也不写入 AppData/XDG；目录不可写时显示失败。
 
+“网络代理”默认使用系统代理（Windows Internet Options 或 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 环境变量），也可选择直连或自定义 HTTP(S)、SOCKS5/SOCKS5H 代理；无协议的 `主机:端口` 按 HTTP 处理。StepFun 和 OpenCode Zen 可分别关闭代理，开关同时作用于模型列表和三个转发协议。本地回环地址始终直连；保存设置后刷新代理配置，重启后保留选择。
+
 - `settings.json`：设置及上游密钥。
 - `requests.sqlite3`：最近 100 条完整请求和持续累计的用量，重启后保留；包含完整用户正文、思考和工具参数，鉴权头与 Cookie 只保存指纹。
 - `webview/`：桌面浏览器缓存、Cookie 和主题数据。

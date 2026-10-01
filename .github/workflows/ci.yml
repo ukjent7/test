@@ -82,6 +82,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
           python tests/e2e.py --gateway "target/release/messages-gateway${suffix}" --checker "target/release/grok-wire-check${suffix}"
           python tests/history_e2e.py --gateway "target/release/messages-gateway${suffix}"
+          python tests/proxy_e2e.py --gateway "target/release/messages-gateway${suffix}"
       - name: Install GUI E2E driver
         run: python -m pip install -r tests/requirements.txt
       - name: Cache Linux E2E browser
@@ -109,6 +110,7 @@ jobs:
           path: |
             artifacts/e2e/
             artifacts/history/
+            artifacts/proxy/
             artifacts/gui/*.png
             artifacts/gui/*.json
             artifacts/gui/*.sqlite3

@@ -30,7 +30,17 @@ pub struct Settings {
     pub stepfun_api_key: String,
     #[serde(default)]
     pub opencode_api_key: String,
+    #[serde(default)]
+    pub proxy: String,
+    #[serde(default = "use_proxy")]
+    pub stepfun_use_proxy: bool,
+    #[serde(default = "use_proxy")]
+    pub opencode_use_proxy: bool,
     pub enabled: bool,
+}
+
+fn use_proxy() -> bool {
+    true
 }
 
 fn opencode_base_url() -> String {
@@ -112,6 +122,7 @@ impl Change {
 
 pub struct Control {
     settings: Settings,
+    clients: [reqwest::Client; 2],
     pub messages_url: reqwest::Url,
     pub opencode_url: reqwest::Url,
     stats: Stats,
@@ -121,7 +132,6 @@ pub struct Control {
 }
 
 pub struct Gateway {
-    pub client: reqwest::Client,
     pub control: Mutex<Control>,
     settings_path: PathBuf,
     listen: SocketAddr,
@@ -292,7 +302,7 @@ impl Gateway {
     pub(crate) fn upstreams(
         &self,
         endpoint: &str,
-    ) -> Result<[(reqwest::Url, String); 2], ApiError> {
+    ) -> Result<[(reqwest::Url, String, reqwest::Client); 2], ApiError> {
         let control = self.control.lock().unwrap();
         if !control.settings.enabled {
             return Err(ApiError(
@@ -301,16 +311,33 @@ impl Gateway {
             ));
         }
         Ok([
-            (&control.messages_url, &control.settings.stepfun_api_key),
-            (&control.opencode_url, &control.settings.opencode_api_key),
+            (
+                &control.messages_url,
+                &control.settings.stepfun_api_key,
+                control.settings.stepfun_use_proxy,
+            ),
+            (
+                &control.opencode_url,
+                &control.settings.opencode_api_key,
+                control.settings.opencode_use_proxy,
+            ),
         ]
-        .map(|(url, key)| {
+        .map(|(url, key, use_proxy)| {
             let mut url = url.clone();
             url.set_path(&format!(
                 "{}/{endpoint}",
                 url.path().trim_end_matches("/messages")
             ));
-            (url, key.clone())
+            let loopback = url.host_str().is_some_and(|host| {
+                host == "localhost"
+                    || host.ends_with(".localhost")
+                    || host
+                        .trim_matches(['[', ']'])
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            });
+            let client = &control.clients[usize::from(!use_proxy || loopback)];
+            (url, key.clone(), client.clone())
         }))
     }
 
@@ -330,6 +357,47 @@ fn settings_error(error: io::Error) -> ApiError {
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("无法保存设置：{error}"),
     )
+}
+
+fn network_clients(proxy: &str) -> Result<[reqwest::Client; 2], ApiError> {
+    let invalid = || {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            "代理地址须使用 HTTP(S)、SOCKS5 或 SOCKS5H，例如 http://127.0.0.1:7890".into(),
+        )
+    };
+    let builder = || {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(30))
+    };
+    let mut proxied = builder();
+    if proxy == "direct" {
+        proxied = proxied.no_proxy();
+    } else if !proxy.is_empty() {
+        let address = if proxy.contains("://") {
+            proxy.to_owned()
+        } else {
+            format!("http://{proxy}")
+        };
+        let url = reqwest::Url::parse(&address).map_err(|_| invalid())?;
+        if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
+            || url.host_str().is_none()
+            || (!proxy.contains("://") && url.port().is_none())
+        {
+            return Err(invalid());
+        }
+        proxied = proxied.proxy(reqwest::Proxy::all(url).map_err(|_| invalid())?);
+    }
+    let build = |builder: reqwest::ClientBuilder| {
+        builder.build().map_err(|error| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                format!("无法应用网络代理设置：{}", error.without_url()),
+            )
+        })
+    };
+    Ok([build(proxied)?, build(builder().no_proxy())?])
 }
 
 fn messages_url(base: &str) -> Result<reqwest::Url, ApiError> {
@@ -372,6 +440,9 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {
             upstream_base_url: "https://api.stepfun.ai/step_plan/v1".into(),
             opencode_base_url: opencode_base_url(),
+            proxy: String::new(),
+            stepfun_use_proxy: true,
+            opencode_use_proxy: true,
             stepfun_api_key: String::new(),
             opencode_api_key: String::new(),
             enabled: true,
@@ -401,13 +472,11 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         .unwrap_or_else(|| settings_path.with_file_name("requests.sqlite3"));
     let history = history::History::open(&history_path)?;
     let next_id = history.last_id()?;
+    let clients = network_clients(&settings.proxy).map_err(|error| io::Error::other(error.1))?;
     let gateway = Arc::new(Gateway {
-        client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(30))
-            .build()?,
         control: Mutex::new(Control {
             settings,
+            clients,
             messages_url,
             opencode_url,
             stats: Stats::default(),
@@ -505,6 +574,9 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Result<Json<Value>, ApiE
         "opencode_base_url": control.settings.opencode_base_url,
         "stepfun_key_configured": !control.settings.stepfun_api_key.is_empty(),
         "opencode_key_configured": !control.settings.opencode_api_key.is_empty(),
+        "proxy": control.settings.proxy,
+        "stepfun_use_proxy": control.settings.stepfun_use_proxy,
+        "opencode_use_proxy": control.settings.opencode_use_proxy,
         "endpoint": format!("http://{}/v1", gateway.listen),
         "stats": control.stats, "calls": calls, "history_error": control.history_error,
     })))
@@ -552,6 +624,9 @@ struct UpstreamInput {
     opencode_base_url: Option<String>,
     stepfun_api_key: Option<String>,
     opencode_api_key: Option<String>,
+    proxy: Option<String>,
+    stepfun_use_proxy: Option<bool>,
+    opencode_use_proxy: Option<bool>,
 }
 
 async fn update_settings(
@@ -577,8 +652,19 @@ async fn update_settings(
     if let Some(key) = input.opencode_api_key {
         settings.opencode_api_key = key.trim().to_owned();
     }
+    if let Some(proxy) = input.proxy {
+        settings.proxy = proxy.trim().to_owned();
+    }
+    if let Some(enabled) = input.stepfun_use_proxy {
+        settings.stepfun_use_proxy = enabled;
+    }
+    if let Some(enabled) = input.opencode_use_proxy {
+        settings.opencode_use_proxy = enabled;
+    }
+    let clients = network_clients(&settings.proxy)?;
     gateway.save(&settings)?;
     control.settings = settings;
+    control.clients = clients;
     control.messages_url = url;
     control.opencode_url = opencode_url;
     Ok(StatusCode::NO_CONTENT)
