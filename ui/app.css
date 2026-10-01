@@ -132,9 +132,11 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .usage-total strong { font-size:13px; overflow-wrap:anywhere; }
 .usage-table { overflow-x:auto; margin-bottom:22px; }
 .usage-table table { width:100%; border-collapse:collapse; font-size:10.5px; }
-.usage-table th,.usage-table td { padding:12px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+.usage-table th,.usage-table td { padding:12px 9px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+.usage-table td { min-width:65px; }
+.usage-table small { display:block; color:var(--muted); white-space:normal; font-size:9px; margin-top:3px; }
 .usage-table th { color:var(--muted); font-weight:500; }
-.usage-table th:first-child,.usage-table td:first-child { text-align:left; max-width:260px; white-space:normal; overflow-wrap:anywhere; min-width:100px; }
+.usage-table th:first-child,.usage-table td:first-child { text-align:left; max-width:260px; white-space:normal; overflow-wrap:anywhere; min-width:140px; }
 .usage-table tbody tr:last-child td { border-bottom:0; }
 footer { position:fixed; bottom:0; left:0; right:0; height:37px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--line); background:var(--bg); color:var(--muted); font-size:10px; padding:0 28px; }
 .footer-dot { width:5px; height:5px; background:var(--muted); border-radius:50%; }

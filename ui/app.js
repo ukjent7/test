@@ -65,7 +65,14 @@ function renderUsage(data) {
     for (const row of rows) {
       const line = body.insertRow();
       for (const value of [models ? `${providerName(row.provider)} / ${row.model}` : providerName(row.provider), ...usageFields(row).map(([, value]) => value)]) {
-        line.insertCell().textContent = value;
+        const cell = line.insertCell();
+        const note = cell.cellIndex ? value.indexOf('（') : -1;
+        cell.textContent = note < 0 ? value : value.slice(0, note);
+        if (note >= 0) {
+          const detail = document.createElement('small');
+          detail.textContent = value.slice(note);
+          cell.append(detail);
+        }
       }
     }
     list.append(table);
