@@ -1,0 +1,17 @@
+name: Resolve proxy dependencies
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo metadata --format-version 1 > /dev/null
+      - uses: actions/upload-artifact@v7
+        with:
+          name: proxy-lock
+          path: Cargo.lock
