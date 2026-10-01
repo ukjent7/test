@@ -8,6 +8,7 @@ Frontend refactor failure scenarios, specified before implementation:
 - Generated client configuration ignores the selected model or protocol.
 - A disconnected status leaves write controls enabled or cannot recover on refresh.
 - An older usage response overwrites a newly selected period.
+- Background polling is mistaken for a user-triggered period request.
 Existing cases cover themes, narrow layouts, literal diff content, clipboard,
 provider/proxy persistence, request filtering, and complete wire/history details.
 """
@@ -437,29 +438,37 @@ def run(binary, output, test):
         pending_usage = []
         usage_fixture = context.request.get(address + "/ui/usage").json()
         page.route("**/ui/usage?*", lambda route: pending_usage.append(route))
-        page.get_by_role("button", name="今天", exact=True).click()
+        with page.expect_request(lambda request: "/ui/usage?since=" in request.url and not request.url.endswith("since=0")) as old_request:
+            page.get_by_role("button", name="今天", exact=True).click()
         expect(page.locator("#usage")).to_have_attribute("aria-busy", "true")
-        page.get_by_role("button", name="全部", exact=True).click()
+        with page.expect_request(lambda request: request.url.endswith("/ui/usage?since=0")) as new_request:
+            page.get_by_role("button", name="全部", exact=True).click()
         expect(page.get_by_role("button", name="全部", exact=True)).to_have_attribute("aria-pressed", "true")
+        selected = (old_request.value, new_request.value)
         for _ in range(50):
-            if len(pending_usage) >= 2:
+            if all(any(route.request == request for route in pending_usage) for request in selected):
                 break
             page.wait_for_timeout(20)
-        assert len(pending_usage) == 2
+        oldest_route, newest_route = [next(route for route in pending_usage if route.request == request) for request in selected]
+        assert oldest_route != newest_route
         newest = json.loads(json.dumps(usage_fixture))
         newest["total"]["requests"] = 222
-        pending_usage[1].fulfill(content_type="application/json", body=json.dumps(newest))
+        newest_route.fulfill(content_type="application/json", body=json.dumps(newest))
         expect(page.get_by_test_id("usage-total")).to_contain_text("222")
         oldest = json.loads(json.dumps(usage_fixture))
         oldest["total"]["requests"] = 111
-        pending_usage[0].fulfill(content_type="application/json", body=json.dumps(oldest))
+        oldest_route.fulfill(content_type="application/json", body=json.dumps(oldest))
         page.wait_for_timeout(100)
         expect(page.get_by_test_id("usage-total")).not_to_contain_text("111")
+        for route in pending_usage:
+            if route not in (oldest_route, newest_route):
+                route.continue_()
         page.unroute("**/ui/usage?*")
         page.get_by_role("button", name="近 30 天", exact=True).click()
         expect(page.get_by_test_id("usage-total")).to_contain_text("67.7%")
         (output / "frontend-transitions.json").write_text(json.dumps({"pending_saves": len(pending_saves),
-            "period_requests": len(pending_usage), "client_config": model_configuration}, indent=2), encoding="utf-8")
+            "period_requests": [request.url for request in selected], "intercepted_usage_requests": len(pending_usage),
+            "client_config": model_configuration}, indent=2), encoding="utf-8")
         passed("usage-latest-period-wins-over-out-of-order-responses")
         page.get_by_role("tab", name="活动", exact=True).click()
 
