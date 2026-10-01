@@ -9,6 +9,94 @@ let toastTimer;
 let callsKey = '';
 let diffRequest = 0;
 let diffDetail = null;
+let usagePeriod = '30d';
+let usageRequest = 0;
+let usageKey = '';
+
+const providerName = provider => ({stepfun: 'StepFun', opencode: 'OpenCode Zen'}[provider] || provider);
+
+function usageFields(row) {
+  const count = value => value == null ? '未报告' : value.toLocaleString('zh-CN');
+  const reported = (value, reports) => `${count(value)}${reports > 0 && reports < row.requests ? `（${reports}/${row.requests} 条报告）` : ''}`;
+  return [
+    ['请求', count(row.requests)],
+    ['总 Token', row.input_tokens == null && row.output_tokens == null ? '未报告'
+      : `${count((row.input_tokens || 0) + (row.output_tokens || 0))}${row.input_reported_requests < row.requests || row.output_reported_requests < row.requests ? '（部分报告）' : ''}`],
+    ['输入', reported(row.input_tokens, row.input_reported_requests)],
+    ['输出', reported(row.output_tokens, row.output_reported_requests)],
+    ['缓存读取', reported(row.cache_read_tokens, row.cache_reported_requests)],
+    ['缓存写入', reported(row.cache_write_tokens, row.cache_write_reported_requests)],
+    ['缓存命中率', row.cache_hit_rate == null ? (row.cache_reported_requests ? '—（输入为零或未报告）' : '未报告')
+      : `${row.cache_hit_rate.toFixed(1)}%${row.cache_reported_requests < row.requests ? `（${row.cache_reported_requests}/${row.requests} 条报告）` : ''}`],
+  ];
+}
+
+function renderUsage(data) {
+  const key = JSON.stringify([usagePeriod, data]);
+  if (key === usageKey) return;
+  usageKey = key;
+  const total = byId('usage-total');
+  total.replaceChildren();
+  for (const [label, value] of usageFields(data.total)) {
+    const item = document.createElement('div');
+    const title = document.createElement('span');
+    title.textContent = label;
+    const number = document.createElement('strong');
+    number.textContent = value;
+    item.append(title, number);
+    total.append(item);
+  }
+  for (const [id, rows, models] of [['usage-providers', data.providers, false], ['usage-models', data.models, true]]) {
+    const list = byId(id);
+    list.replaceChildren();
+    if (!rows.length) {
+      diffLine(list, 'diff-empty', '此时间范围内没有请求');
+      continue;
+    }
+    const table = document.createElement('table');
+    const header = table.createTHead().insertRow();
+    for (const label of [models ? '供应商 / 模型' : '供应商', ...usageFields(data.total).map(([label]) => label)]) {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = label;
+      header.append(cell);
+    }
+    const body = table.createTBody();
+    for (const row of rows) {
+      const line = body.insertRow();
+      for (const value of [models ? `${providerName(row.provider)} / ${row.model}` : providerName(row.provider), ...usageFields(row).map(([, value]) => value)]) {
+        line.insertCell().textContent = value;
+      }
+    }
+    list.append(table);
+  }
+}
+
+async function refreshUsage() {
+  if (byId('usage').hidden) return;
+  const sequence = ++usageRequest;
+  const since = new Date();
+  since.setHours(0, 0, 0, 0);
+  since.setDate(since.getDate() - ({today: 0, '7d': 6, '30d': 29}[usagePeriod] || 0));
+  try {
+    const data = await request(`/ui/usage?since=${usagePeriod === 'all' ? 0 : since.getTime()}`);
+    if (sequence !== usageRequest) return;
+    renderUsage(data);
+    byId('usage-error').hidden = true;
+  } catch (error) {
+    if (sequence !== usageRequest) return;
+    byId('usage-error').textContent = error.message;
+    byId('usage-error').hidden = false;
+  }
+}
+
+for (const button of document.querySelectorAll('[data-period]')) {
+  button.addEventListener('click', () => {
+    usagePeriod = button.dataset.period;
+    for (const other of document.querySelectorAll('[data-period]')) other.setAttribute('aria-pressed', String(other === button));
+    refreshUsage();
+  });
+}
 
 async function request(path, body) {
   const response = await fetch(path, body === undefined ? {} : {
@@ -248,6 +336,7 @@ async function refresh() {
     renderCalls(current.calls);
     byId('history-error').hidden = !current.history_error;
     byId('history-error').textContent = current.history_error || '';
+    await refreshUsage();
   } catch {
     byId('state').textContent = '连接已断开';
     byId('state').classList.remove('running');
@@ -266,6 +355,7 @@ for (const tab of document.querySelectorAll('[role="tab"]')) {
       other.setAttribute('aria-selected', String(other === tab));
       byId(other.getAttribute('aria-controls')).hidden = other !== tab;
     }
+    refreshUsage();
   });
 }
 

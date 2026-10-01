@@ -48,6 +48,7 @@ pub fn identity<'a>(headers: &'a HeaderMap, request: &'a Value) -> Option<(&'sta
 #[derive(Default, Serialize)]
 pub struct Usage {
     pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
     pub cache_read_tokens: Option<u64>,
     pub cache_write_tokens: Option<u64>,
     #[serde(skip)]
@@ -69,6 +70,13 @@ impl Usage {
             "input_tokens"
         }]
         .as_u64();
+        self.output_tokens = usage[if endpoint == "chat/completions" {
+            "completion_tokens"
+        } else {
+            "output_tokens"
+        }]
+        .as_u64()
+        .or(self.output_tokens);
         let (read, write) = match endpoint {
             "messages" => (
                 usage["cache_read_input_tokens"].as_u64(),

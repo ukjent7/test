@@ -662,7 +662,7 @@ def run(binary, checker, output):
                     extra_headers={"x-grok-conv-id": "PRIVATE_CACHE_SESSION"})
                 assert status == 200 and wire == bytes.fromhex(captures[bare]["response_hex"])
                 call = latest_call(bare)
-                assert call["cache"] == expected, call
+                assert call["cache"] == {**expected, "output_tokens": 23 if endpoint == "messages" and streaming else None}, call
                 assert call["routing"]["source"] == "x-grok-conv-id"
                 assert "PRIVATE_CACHE" not in json.dumps(call)
                 observations.append({"model": bare, "stream": streaming, "call": call})
@@ -672,13 +672,13 @@ def run(binary, checker, output):
                    "messages": [{"role": "user", "content": "hi"}]}
         assert post("cache-messages-delta", payload)[0] == 200
         assert latest_call(payload["model"])["cache"] == {
-            "input_tokens": 1050, "cache_read_tokens": 800, "cache_write_tokens": 200}
+            "input_tokens": 1050, "output_tokens": 23, "cache_read_tokens": 800, "cache_write_tokens": 200}
         passed("cache-messages-delta-replaces-cumulative-usage")
         release.clear()
         payload = {"model": "cache-chat-live", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
         assert post(payload["model"], payload, path="/v1/chat/completions", live=True,
                     first_events=[{"choices": []}])[0] == 200
-        assert latest_call(payload["model"])["cache"] == CACHE_FIXTURES["cache-chat-hit"][2]
+        assert latest_call(payload["model"])["cache"] == {**CACHE_FIXTURES["cache-chat-hit"][2], "output_tokens": None}
         passed("cache-native-sse-remains-live")
         (output / "cache-observations.json").write_text(json.dumps(observations, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -785,7 +785,7 @@ def run(binary, checker, output):
         assert bytes(exchange["attempts"][1]["response"]["body"]) == ZEN_WIRE
         assert bytes(exchange["response"]["body"]) == wire
         assert "PRIVATE_FREE_MESSAGE" in bytes(exchange["request"]["body"]).decode()
-        assert detail["call"]["cache"] == {"input_tokens": 225, "cache_read_tokens": 0, "cache_write_tokens": 0}
+        assert detail["call"]["cache"] == {"input_tokens": 225, "output_tokens": 19, "cache_read_tokens": 0, "cache_write_tokens": 0}
         (output / "free-request-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("free-json-collapses-real-mimo-stream")
 
@@ -829,7 +829,7 @@ def run(binary, checker, output):
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "模型前缀路由" for change in detail["diff"]["request"])
         assert "configured-zen-key" not in json.dumps(detail)
-        assert detail["call"]["cache"] == {"input_tokens": None, "cache_read_tokens": None, "cache_write_tokens": None}
+        assert detail["call"]["cache"] == {"input_tokens": None, "output_tokens": None, "cache_read_tokens": None, "cache_write_tokens": None}
         (output / "routed-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("configured-keys-private-and-routing-visible")
         report["status"] = "passed"

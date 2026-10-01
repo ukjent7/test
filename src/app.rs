@@ -10,7 +10,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State},
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -421,6 +421,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     });
     let ui = Router::new()
         .route("/ui/status", get(status))
+        .route("/ui/usage", get(usage))
         .route("/ui/calls/{id}", get(call_diff))
         .route("/ui/settings", post(update_settings))
         .route("/ui/enabled", post(set_enabled))
@@ -520,6 +521,20 @@ async fn call_diff(
         .map_err(history_error)?
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into()))?;
     Ok(Json(detail))
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+async fn usage(
+    State(gateway): State<Arc<Gateway>>,
+    Query(query): Query<UsageQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let control = gateway.control.lock().unwrap();
+    Ok(Json(control.history.usage(query.since).map_err(history_error)?))
 }
 
 fn history_error(error: rusqlite::Error) -> ApiError {

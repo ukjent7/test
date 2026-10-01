@@ -1,6 +1,6 @@
 # Messages 网关
 
-Rust 桌面网关，原生转发 Messages、Chat Completions 和 Responses，支持 StepFun 与 OpenCode Zen。默认地址为 `http://127.0.0.1:8789`，界面提供上游配置、模型列表、缓存用量、最近 100 条请求及完整请求/响应差异。
+Rust 桌面网关，原生转发 Messages、Chat Completions 和 Responses，支持 StepFun 与 OpenCode Zen。默认地址为 `http://127.0.0.1:8789`，界面提供上游配置、模型列表、Token 与缓存统计、最近 100 条请求及完整请求/响应差异。
 
 ## 下载与运行
 
@@ -44,8 +44,10 @@ api_backend = "chat_completions"
 设置保存后立即用于新请求。界面密钥框留空会保留已有密钥。默认数据跟随可执行文件目录，不随启动工作目录变化，也不写入 AppData/XDG；目录不可写时显示失败。
 
 - `settings.json`：设置及上游密钥。
-- `requests.sqlite3`：最近 100 条请求，重启后保留；包含完整用户正文、思考和工具参数，鉴权头与 Cookie 只保存指纹。
+- `requests.sqlite3`：最近 100 条完整请求和持续累计的用量，重启后保留；包含完整用户正文、思考和工具参数，鉴权头与 Cookie 只保存指纹。
 - `webview/`：桌面浏览器缓存、Cookie 和主题数据。
+
+“统计”页按今天、近 7 天、近 30 天、全部展示总览、供应商和供应商模型的输入/输出 Token、缓存读取/写入与命中率。时间范围按本地自然日计算，命中率按已报告缓存的请求输入 Token 加权；缺失与部分报告明确标注。升级会纳入尚存的最近 100 条历史，旧记录没有输出 Token 时保持未报告。
 
 可通过环境变量覆盖配置：
 

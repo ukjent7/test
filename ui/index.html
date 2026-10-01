@@ -15,6 +15,7 @@
     <nav class="segments" role="tablist" aria-label="页面">
       <button role="tab" id="tab-gateway" aria-controls="gateway" aria-selected="true">网关</button>
       <button role="tab" id="tab-activity" aria-controls="activity" aria-selected="false">活动</button>
+      <button role="tab" id="tab-usage" aria-controls="usage" aria-selected="false">统计</button>
     </nav>
     <button class="icon theme" id="theme" aria-label="切换主题" title="切换主题">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.2A7 7 0 0 1 7.8 3.8a7 7 0 1 0 8.4 8.4Z"/></svg>
@@ -67,6 +68,24 @@
       </div>
       <p class="hint">模型前缀自动选择上游；客户端需使用对应的 Messages、Chat Completions 或 Responses 协议。</p>
       <p class="field-error" id="model-error" role="alert" hidden></p>
+    </section>
+
+    <section id="usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+      <div class="section-head"><h2>Token 用量与缓存</h2><span class="subtle">累计保存 · 自动刷新</span></div>
+      <div class="usage-periods" role="group" aria-label="统计时间范围">
+        <button class="pill" data-period="today" aria-pressed="false">今天</button>
+        <button class="pill" data-period="7d" aria-pressed="false">近 7 天</button>
+        <button class="pill" data-period="30d" aria-pressed="true">近 30 天</button>
+        <button class="pill" data-period="all" aria-pressed="false">全部</button>
+      </div>
+      <div class="section-head"><h2>总览</h2></div>
+      <div class="list usage-total" id="usage-total" data-testid="usage-total"></div>
+      <div class="section-head"><h2>供应商</h2></div>
+      <div class="list usage-table" id="usage-providers" data-testid="usage-providers"></div>
+      <div class="section-head"><h2>供应商 / 模型</h2></div>
+      <div class="list usage-table" id="usage-models" data-testid="usage-models"></div>
+      <p class="field-error" id="usage-error" role="alert" hidden></p>
+      <p class="privacy-note">按本地自然日统计。总 Token = 输入 + 输出；输入包含缓存读取与写入。命中率 = 已报告缓存用量的请求中，缓存读取 / 输入总量。未报告字段显示“未报告”，部分报告标明请求数。升级时纳入仍保留的历史记录；累计统计不受最近 100 条限制。</p>
     </section>
 
     <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>

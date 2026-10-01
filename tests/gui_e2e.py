@@ -301,6 +301,32 @@ def run(binary, output):
             ensure_ascii=False, indent=2), encoding="utf-8")
         passed("cache-usage-zero-unknown-routing-and-themes")
 
+        response = context.request.post(address + "/v1/messages", data={**request_body, "model": "opencode/step-5-preview"})
+        assert response.status == 200
+        page.get_by_role("tab", name="统计", exact=True).click()
+        expect(page.get_by_test_id("usage-total")).to_contain_text("67.7%")
+        expect(page.get_by_test_id("usage-total")).to_contain_text("3,200")
+        expect(page.get_by_test_id("usage-providers")).to_contain_text("StepFun")
+        expect(page.get_by_test_id("usage-providers")).to_contain_text("OpenCode Zen")
+        expect(page.get_by_test_id("usage-models")).to_contain_text("StepFun / step-5-preview")
+        expect(page.get_by_test_id("usage-models")).to_contain_text("OpenCode Zen / step-5-preview")
+        expect(page.get_by_test_id("usage-models")).to_contain_text("未报告")
+        for name in ("今天", "近 7 天", "近 30 天", "全部"):
+            page.get_by_role("button", name=name, exact=True).click()
+            expect(page.get_by_role("button", name=name, exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(page.get_by_test_id("usage-total")).to_contain_text("67.7%")
+        page.screenshot(path=str(output / "usage-light.png"))
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        page.screenshot(path=str(output / "usage-dark.png"))
+        page.set_viewport_size({"width": 460, "height": 740})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(output / "usage-narrow.png"))
+        page.set_viewport_size({"width": 760, "height": 760})
+        page.get_by_role("button", name="切换主题", exact=True).click()
+        (output / "usage.json").write_text(json.dumps(context.request.get(address + "/ui/usage").json(), indent=2), encoding="utf-8")
+        passed("usage-periods-three-levels-weighted-hit-rate-and-themes")
+        page.get_by_role("tab", name="活动", exact=True).click()
+
         def latest_detail():
             calls = context.request.get(address + "/ui/status").json()["calls"]
             assert all("diff" not in call for call in calls), "polling must not download diff bodies"
@@ -452,6 +478,7 @@ def run(binary, output):
         page.keyboard.press("Escape")
         page.get_by_label("仅错误", exact=True).uncheck()
         retained = context.request.get(address + "/ui/status").json()["calls"]
+        retained_usage = context.request.get(address + "/ui/usage").json()
         passed("byte-diff-whitespace-full-error-filter-and-copy")
         context.tracing.stop(path=str(output / "gui-trace.zip"))
         tracing = False
@@ -469,6 +496,8 @@ def run(binary, output):
         assert restarted["opencode_base_url"] == opencode_url
         assert restarted["stepfun_key_configured"] and restarted["opencode_key_configured"]
         assert restarted["calls"] == retained, "request history must survive restart"
+        with urllib.request.urlopen(address + "/ui/usage") as response:
+            assert json.load(response) == retained_usage
         with urllib.request.urlopen(address + f"/ui/calls/{error_detail['call']['id']}") as response:
             assert json.load(response) == error_detail
         passed("restart-loads-settings-and-complete-request-history")

@@ -39,8 +39,29 @@ def run(binary, output):
                 wire = sse_wire
             if model == "history-binary":
                 wire = b"\xff\x00\xfe \t\r\n"
+            if model.startswith("usage-"):
+                usage = {
+                    "usage-shared": {"input_tokens": 100, "output_tokens": 40,
+                                     "cache_read_input_tokens": 700, "cache_creation_input_tokens": 200},
+                    "usage-zero": {"input_tokens": 0, "output_tokens": 0,
+                                   "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+                    "usage-unknown": {"input_tokens": 500},
+                    "usage-other": {"input_tokens": 500, "output_tokens": 30,
+                                    "input_tokens_details": {"cached_tokens": 100}},
+                }.get(model, {})
+                if self.path.endswith("chat/completions"):
+                    usage = {"prompt_tokens": 2000, "completion_tokens": 60,
+                             "prompt_tokens_details": {"cached_tokens": 500}}
+                wire = json.dumps({"usage": usage}).encode()
+                if model == "usage-stream":
+                    wire = b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in [
+                        {"type": "message_start", "message": {"usage": {"input_tokens": 50,
+                         "output_tokens": 0, "cache_read_input_tokens": 150, "cache_creation_input_tokens": 0}}},
+                        {"type": "message_delta", "usage": {"output_tokens": 25}},
+                        {"type": "message_delta", "usage": {"output_tokens": 25}},
+                    ])
             self.send_response(status)
-            self.send_header("Content-Type", "text/event-stream" if model.startswith("history-sse") else "application/json")
+            self.send_header("Content-Type", "text/event-stream" if model.startswith("history-sse") or model == "usage-stream" else "application/json")
             self.send_header("Content-Length", str(len(wire) + (100 if model in ("history-sse-truncated", "history-sse-cancel") else 0)))
             self.send_header("X-Fixture", "header  spaces")
             self.send_header("Set-Cookie", "PRIVATE_RESPONSE_COOKIE")
@@ -67,6 +88,7 @@ def run(binary, output):
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "GATEWAY_CONFIG": str(output.resolve() / "settings.json"), "GATEWAY_DB": str(db),
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/v1",
+           "GATEWAY_OPENCODE_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/v1",
            "GATEWAY_STEPFUN_API_KEY": "PRIVATE_CONFIGURED_KEY"}
     log = (output / "gateway.log").open("wb")
     process = None
@@ -129,6 +151,9 @@ def run(binary, output):
         assert process.wait(timeout=10) != 0, "invalid database path was silently ignored"
         passed("database-open-failure-is-explicit")
         launch()
+        empty_usage = get("/ui/usage")
+        assert empty_usage["total"]["requests"] == 0 and empty_usage["total"]["cache_hit_rate"] is None
+        assert empty_usage["providers"] == [] and empty_usage["models"] == []
         with sqlite3.connect(db) as connection:
             connection.execute("BEGIN IMMEDIATE")
             assert http("POST", "/v1/messages", b'{"model":"history-storage-failed"}')[0] == 200
@@ -137,6 +162,33 @@ def run(binary, output):
         assert http("POST", "/v1/messages", b'{"model":"history-storage-recovered"}')[0] == 200
         assert settled()["history_error"] is None
         passed("database-write-failure-visible-and-recoverable")
+        baseline = get("/ui/usage")["total"]["requests"]
+        for endpoint, model in [("messages", "stepfun/usage-shared"),
+                                ("chat/completions", "opencode/usage-shared"),
+                                ("responses", "opencode/usage-other"),
+                                ("messages", "usage-unknown"), ("messages", "usage-zero"),
+                                ("messages", "usage-stream")]:
+            assert http("POST", f"/v1/{endpoint}", json.dumps({"model": model, "stream": model == "usage-stream"}).encode())[0] == 200
+        settled()
+        usage = get("/ui/usage")
+        total = usage["total"]
+        assert total["requests"] == baseline + 6
+        assert (total["input_tokens"], total["output_tokens"], total["cache_read_tokens"], total["cache_write_tokens"]) == (4200, 155, 1450, 200)
+        assert abs(total["cache_hit_rate"] - 1450 / 3700 * 100) < 1e-9
+        assert total["cache_reported_requests"] == 5
+        shared = [row for row in usage["models"] if row["model"] == "usage-shared"]
+        assert {row["provider"] for row in shared} == {"stepfun", "opencode"}
+        unknown = next(row for row in usage["models"] if row["model"] == "usage-unknown")
+        assert unknown["cache_hit_rate"] is None and unknown["output_tokens"] is None
+        zero = next(row for row in usage["models"] if row["model"] == "usage-zero")
+        assert zero["cache_read_tokens"] == 0 and zero["cache_reported_requests"] == 1 and zero["cache_hit_rate"] is None
+        stream = next(row for row in usage["models"] if row["model"] == "usage-stream")
+        assert stream["input_tokens"] == 200 and stream["output_tokens"] == 25
+        assert sum(row["requests"] for row in usage["providers"]) == total["requests"]
+        assert get("/ui/usage?since=9999999999999")["total"]["requests"] == 0
+        assert http("GET", "/ui/usage?since=invalid")[0] == 400
+        (output / "usage-protocols.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
+        passed("usage-three-levels-native-protocols-stream-cumulative-zero-and-unknown")
         original = b'{ \t"model" : "stepfun/history-whitespace", "stream": false, "messages": [] }\r\n'
         status, wire = http("POST", "/v1/messages?space=a%20b", original)
         assert status == 200 and wire == normal_wire
@@ -231,6 +283,9 @@ def run(binary, output):
         assert statuses == [200] * 12
         assert http("POST", "/v1/messages", b'{"model":"history-error"}')[0] == 429
         before_restart = settled()
+        usage_before_restart = get("/ui/usage")
+        assert usage_before_restart["total"]["input_tokens"] == 4200
+        assert usage_before_restart["total"]["requests"] > 100
         assert len(before_restart["calls"]) == 100
         assert len({call["id"] for call in before_restart["calls"]}) == 100
         assert http("GET", f"/ui/calls/{first_id}")[0] == 404
@@ -242,6 +297,9 @@ def run(binary, output):
         process.wait(timeout=10)
         launch()
         after_restart = settled()
+        assert get("/ui/usage") == usage_before_restart
+        (output / "usage-retention-restart.json").write_text(json.dumps(usage_before_restart, indent=2), encoding="utf-8")
+        passed("usage-survives-100-row-retention-and-restart-without-double-counting")
         assert after_restart["calls"] == before_restart["calls"]
         value = detail("history-error")
         assert value["exchange"]["response"]["body"] == list(error_wire)
@@ -251,6 +309,28 @@ def run(binary, output):
         with sqlite3.connect(db) as source, sqlite3.connect(output / "history-backup.sqlite3") as backup:
             source.backup(backup)
         (output / "upstream-captures.json").write_text(json.dumps(captures, indent=2), encoding="utf-8")
+        process.terminate()
+        process.wait(timeout=10)
+        anchor, day = 1700000000000, 86400000
+        with sqlite3.connect(db) as connection:
+            connection.execute("DROP TABLE usage")
+            connection.execute("UPDATE calls SET summary = json_set(summary, '$.timestamp', 0)")
+            ids = [row[0] for row in connection.execute("SELECT id FROM calls ORDER BY id DESC LIMIT 4")]
+            for call_id, days in zip(ids, (0, 6, 29, 30)):
+                connection.execute("UPDATE calls SET summary = json_remove(json_set(summary, '$.timestamp', ?, '$.cache.input_tokens', 100, '$.cache.cache_read_tokens', 50), '$.cache.output_tokens') WHERE id = ?",
+                                   (anchor - days * day, call_id))
+        launch()
+        migration = get("/ui/usage")
+        assert migration["total"]["requests"] == 100 and migration["total"]["output_tokens"] is None
+        windows = {str(days): get(f"/ui/usage?since={anchor - days * day}") for days in (0, 6, 29)}
+        assert [value["total"]["requests"] for value in windows.values()] == [1, 2, 3]
+        assert all(value["total"]["cache_hit_rate"] == 50 for value in windows.values())
+        process.terminate()
+        process.wait(timeout=10)
+        launch()
+        assert get("/ui/usage") == migration
+        (output / "usage-upgrade-and-windows.json").write_text(json.dumps({"anchor": anchor, "windows": windows, "all": migration}, indent=2), encoding="utf-8")
+        passed("legacy-history-backfill-idempotent-local-day-window-boundaries")
         process.terminate()
         process.wait(timeout=10)
         portable = output.resolve() / "便携 网关"
