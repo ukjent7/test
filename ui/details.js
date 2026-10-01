@@ -29,12 +29,73 @@ function rawSnapshot(parent, title, snapshot, testid) {
   parent.append(details);
 }
 
+function jsonDifference(before, after) {
+  let left, right;
+  try {
+    const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+    left = JSON.parse(decoder.decode(new Uint8Array(before)));
+    right = JSON.parse(decoder.decode(new Uint8Array(after)));
+  } catch {
+    return null;
+  }
+  const changes = [];
+  function walk(a, b, path) {
+    if (a === b) return;
+    if (a && b && typeof a === 'object' && typeof b === 'object' && Array.isArray(a) === Array.isArray(b)) {
+      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        walk(Object.hasOwn(a, key) ? a[key] : undefined, Object.hasOwn(b, key) ? b[key] : undefined,
+          `${path}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`);
+      }
+    } else changes.push({path: path || '/', before: a, after: b});
+  }
+  walk(left, right, '');
+  return changes;
+}
+
+function byteDifference(parent, before, after) {
+  const changes = ByteDiff.diffArrays(before, after, {timeout: 1000});
+  if (!changes) {
+    diffLine(parent, 'diff-empty', '字节差异计算超时。完整数据可在原始/实际正文中展开，或使用“复制差异”导出；上方 JSON 字段差异仍有效。');
+    return;
+  }
+  let oldOffset = 0, newOffset = 0, changed = false;
+  for (const change of changes) {
+    if (change.removed || change.added) {
+      changed = true;
+      diffLine(parent, change.removed ? 'removed' : 'added',
+        `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.count} 字节: ${byteText(change.value)}`);
+    }
+    if (!change.added) oldOffset += change.count;
+    if (!change.removed) newOffset += change.count;
+  }
+  if (!changed) diffLine(parent, 'diff-empty', '正文逐字节相同');
+}
+
 function wireDifference(parent, title, before, after, testid) {
   const section = document.createElement('section');
   section.dataset.testid = testid;
   const heading = document.createElement('h3');
   heading.textContent = title;
   section.append(heading);
+  const identical = before.body.length === after.body.length && before.body.every((value, index) => value === after.body[index]);
+  const body = element('div', 'json-body-diff');
+  const changes = identical ? [] : jsonDifference(before.body, after.body);
+  if (identical) diffLine(body, 'diff-empty', '正文逐字节相同');
+  else if (changes === null) diffLine(body, 'diff-empty', '正文不是完整 JSON，请展开字节差异查看改动。');
+  else if (!changes.length) diffLine(body, 'diff-empty', 'JSON 内容相同；字段顺序、序列化与空白变化见字节差异。');
+  else {
+    body.append(element('p', 'diff-body-summary', `JSON 字段变化 · ${changes.length} 处`));
+    for (const change of changes) {
+      const item = element('div', 'diff-item');
+      item.dataset.jsonPath = change.path;
+      item.append(element('code', '', change.path));
+      const format = value => value === undefined ? '（字段不存在）' : JSON.stringify(value, null, 2);
+      diffLine(item, 'removed', `− ${format(change.before)}`);
+      diffLine(item, 'added', `+ ${format(change.after)}`);
+      body.append(item);
+    }
+  }
+  section.append(body);
   const metadata = snapshot => {
     const values = {target: snapshot.target, status: snapshot.status, complete: snapshot.complete};
     for (const [name, value] of snapshot.headers) (values[`header/${name}`] ||= []).push(value);
@@ -46,24 +107,15 @@ function wireDifference(parent, title, before, after, testid) {
     diffLine(section, 'removed', `− ${key}: ${Object.hasOwn(left, key) ? visible(left[key]) : '（不存在）'}`);
     diffLine(section, 'added', `+ ${key}: ${Object.hasOwn(right, key) ? visible(right[key]) : '（不存在）'}`);
   }
-  const changes = ByteDiff.diffArrays(before.body, after.body, {timeout: 1000});
-  if (!changes) {
-    diffLine(section, 'diff-empty', '精确差异计算超时；以下显示完整前后正文，未截断。');
-    diffLine(section, 'removed', `− ${byteText(before.body)}`);
-    diffLine(section, 'added', `+ ${byteText(after.body)}`);
-  } else {
-    let oldOffset = 0, newOffset = 0, changed = false;
-    for (const change of changes) {
-      if (change.removed || change.added) {
-        changed = true;
-        diffLine(section, change.removed ? 'removed' : 'added',
-          `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.count} 字节: ${byteText(change.value)}`);
-      }
-      if (!change.added) oldOffset += change.count;
-      if (!change.removed) newOffset += change.count;
-    }
-    if (!changed) diffLine(section, 'diff-empty', '正文逐字节相同');
-  }
+  const bytes = element('details', 'byte-diff');
+  bytes.append(element('summary', '', `字节差异（含字段顺序与空白） · ${before.body.length} → ${after.body.length} 字节`));
+  let rendered = false;
+  bytes.addEventListener('toggle', () => {
+    if (!bytes.open || rendered) return;
+    rendered = true;
+    byteDifference(bytes, before.body, after.body);
+  });
+  section.append(bytes);
   parent.append(section);
 }
 

@@ -145,6 +145,8 @@
     "diff-json-request-response-and-literal-content",
     "diff-sse-event-index-and-theme",
     "byte-diff-whitespace-full-error-filter-and-copy",
+    "json-body-diff-reordering-single-field-and-lazy-bytes",
+    "byte-diff-timeout-preserves-full-data-without-body-highlights",
     "all-frontend-workflows-without-script-errors",
     "restart-loads-settings-and-complete-request-history"
   ],
