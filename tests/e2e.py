@@ -353,7 +353,7 @@ def run(binary, checker, output):
         try:
             if live:
                 started = time.monotonic()
-                while not wire.endswith(b"\n\n"):
+                while not wire.endswith((b"\n\n", b"\r\n\r\n")):
                     wire += response.read(1)
                 report["first_event_seconds"] = time.monotonic() - started
                 assert decode_sse(wire) == ([START] if first_events is None else first_events)

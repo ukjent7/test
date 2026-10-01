@@ -18,7 +18,12 @@ pub fn identity<'a>(headers: &'a HeaderMap, request: &'a Value) -> Option<(&'sta
         "session_id",
     ]
     .into_iter()
-    .map(|name| (name, headers.get(name).and_then(|value| value.to_str().ok())))
+    .map(|name| {
+        (
+            name,
+            headers.get(name).and_then(|value| value.to_str().ok()),
+        )
+    })
     .chain([
         ("prompt_cache_key", request["prompt_cache_key"].as_str()),
         (
@@ -27,7 +32,10 @@ pub fn identity<'a>(headers: &'a HeaderMap, request: &'a Value) -> Option<(&'sta
                 .get("x-grok-conv-id")
                 .and_then(|value| value.to_str().ok()),
         ),
-        ("metadata.session_id", request["metadata"]["session_id"].as_str()),
+        (
+            "metadata.session_id",
+            request["metadata"]["session_id"].as_str(),
+        ),
         ("conversation_id", request["conversation_id"].as_str()),
     ])
     .find_map(|(source, value)| {
@@ -73,7 +81,10 @@ impl Usage {
                     .or_else(|| usage["cached_tokens"].as_u64()),
                 usage["prompt_tokens_details"]["cache_write_tokens"].as_u64(),
             ),
-            _ => (usage["input_tokens_details"]["cached_tokens"].as_u64(), None),
+            _ => (
+                usage["input_tokens_details"]["cached_tokens"].as_u64(),
+                None,
+            ),
         };
         // Streaming usage is cumulative; omitted fields retain their last reported value.
         self.cache_read_tokens = read.or(self.cache_read_tokens);
