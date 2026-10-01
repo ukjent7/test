@@ -59,7 +59,7 @@ Grok 会在下一轮把无签名思考内容也回传为 thinking；网关采用
 
 ## Windows 使用
 
-从 GitHub Actions 的成功运行下载 `messages-gateway-windows-latest` 并解压。运行：
+从 [最新版 Release](https://github.com/ukjent7/test/releases/latest) 下载 [Windows x64 程序](https://github.com/ukjent7/test/releases/latest/download/messages-gateway.exe)，放到自己的网关目录。运行：
 
 ```powershell
 .\messages-gateway.exe
@@ -121,13 +121,17 @@ CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网�
 
 ## GitHub Actions 验证
 
+阶段性修改直接提交并推送到 main，无需再次确认。格式检查与 Windows/Linux 的完整构建、E2E 全部通过后，自动发布 `build-<运行序号>` Release，标签绑定本次提交，附带两个平台的已验证二进制、SHA256SUMS 与 CI 链接；失败不会发布，PR 仅验证。重跑同一次工作流不会重复创建 Release。
+
+固定下载地址始终指向最新成功发布的版本：[Windows x64](https://github.com/ukjent7/test/releases/latest/download/messages-gateway.exe)、[Linux x64](https://github.com/ukjent7/test/releases/latest/download/messages-gateway-linux-x64)、[SHA-256 清单](https://github.com/ukjent7/test/releases/latest/download/SHA256SUMS)。Linux 下载后执行 `chmod +x messages-gateway-linux-x64`。更新时退出程序并替换可执行文件，同目录的设置与历史继续保留。
+
 参考 [Wry](https://github.com/tauri-apps/wry/blob/dev/.github/workflows/clippy-fmt.yml)、[Tauri](https://github.com/tauri-apps/tauri/blob/dev/.github/workflows/test-api-e2e.yml) 和 [uv](https://github.com/astral-sh/uv/blob/main/.github/workflows/ci.yml) 的编排。格式检查与 Windows/Linux 构建并行；Clippy 使用 release 配置，Grok 校验器复用同一个 target 目录，避免单独重建依赖。Rust、pip 和 Linux 浏览器均有缓存，E2E 失败也保留 Rust 缓存。同分支新提交取消旧任务，push 只检查 main，其他分支通过 PR 检查，避免一份变更触发两组 CI。
 
 CI 不修改源文件、不执行 cargo update，始终用已提交的锁文件构建；Dependabot 每周分组更新 Rust、Python 和 Actions 依赖，通过同一套 E2E 验证后合入。`All checks passed` 要求格式检查及两个平台的完整构建/E2E 均成功，单个平台中某一步通过不代表整组完成。
 
 本机不安装 Rust、不编译、不执行 E2E。CI 在 Linux 和 Windows 上编译、运行 Clippy，并启动真实网关与 HTTP 夹具上游进行 E2E。测试先验证日志原始事件被 Grok 实际生产 wire types 拒绝，再验证所有修补后的正常事件能被同一类型解析。wire types 从固定 Git revision 下载并检查 SHA-256，不改写为简化测试类型。
 
-场景详见 [tests/FAILURE_MODES.md](tests/FAILURE_MODES.md)。成功运行提供两类 Actions 产物：
+场景详见 [tests/FAILURE_MODES.md](tests/FAILURE_MODES.md)。可执行文件直接从 Release 下载；Actions 同时保留两类归档产物：
 
 - `messages-gateway-*`：对应操作系统的可执行文件。
 - `e2e-*`：协议请求/响应、Grok 解析结果，以及 GUI 与 diff 的浅色/深色/窄窗口截图、JSON/SSE 差异快照、交互 trace、状态快照、汇总 `report.json`、工具链版本、依赖锁文件和 `sha256.json`。Windows GUI 测试操作真正的桌面 WebView2；Linux 测试同时验证原生窗口启动与相同页面的控件。失败时也保存已有证据。

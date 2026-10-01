@@ -141,3 +141,51 @@ jobs:
           FORMAT: ${{ needs.format.result }}
           BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
         run: test "$FORMAT" = success && test "$BUILD_AND_E2E" = success
+
+  release:
+    name: Publish release
+    needs: ci-status
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: messages-gateway-*
+          path: binaries
+      - name: Prepare release files
+        run: |
+          mkdir release
+          cp binaries/messages-gateway-windows-latest/messages-gateway.exe release/messages-gateway.exe
+          cp binaries/messages-gateway-ubuntu-latest/messages-gateway release/messages-gateway-linux-x64
+          cd release
+          sha256sum messages-gateway.exe messages-gateway-linux-x64 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Publish verified binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="build-${GITHUB_RUN_NUMBER}"
+          draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [[ "$draft" == false ]]; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+          if [[ "$draft" == true ]]; then
+            gh release upload "$tag" release/* --clobber
+            gh release edit "$tag" --draft=false --latest
+            exit 0
+          fi
+          cat > notes.md <<EOF
+          提交：${GITHUB_SHA}
+          [Windows/Linux 构建与完整 E2E](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) 全部通过。
+
+          Windows x64 下载 messages-gateway.exe；Linux x64 下载 messages-gateway-linux-x64，运行前执行 chmod +x。
+          SHA256SUMS 可用于核验下载文件；设置、请求历史与 WebView 数据保存在程序所在目录。
+          EOF
+          gh release create "$tag" release/* \
+            --target "$GITHUB_SHA" --title "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA:0:7})" \
+            --notes-file notes.md --generate-notes --latest
