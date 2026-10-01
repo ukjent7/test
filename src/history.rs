@@ -46,7 +46,9 @@ impl History {
 
     pub fn last_id(&self) -> rusqlite::Result<u64> {
         self.0
-            .query_row("SELECT coalesce(max(id), 0) FROM calls", [], |row| row.get(0))
+            .query_row("SELECT coalesce(max(id), 0) FROM calls", [], |row| {
+                row.get(0)
+            })
     }
 
     pub fn save(&mut self, id: u64, summary: &Value, detail: &Value) -> rusqlite::Result<()> {
@@ -77,7 +79,6 @@ impl History {
 }
 
 fn value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    serde_json::from_str(&row.get::<_, String>(0)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
-    })
+    serde_json::from_str(&row.get::<_, String>(0)?)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error)))
 }

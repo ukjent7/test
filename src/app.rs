@@ -203,7 +203,11 @@ impl Trace {
                 .map(|(name, value)| {
                     let value = if matches!(
                         name.as_str(),
-                        "authorization" | "x-api-key" | "cookie" | "set-cookie" | "proxy-authorization"
+                        "authorization"
+                            | "x-api-key"
+                            | "cookie"
+                            | "set-cookie"
+                            | "proxy-authorization"
                     ) {
                         format!(
                             "[已隐藏 · {:016x}]",
@@ -211,7 +215,16 @@ impl Trace {
                         )
                     } else {
                         std::str::from_utf8(value.as_bytes()).map_or_else(
-                            |_| format!("HEX {}", value.as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>()),
+                            |_| {
+                                format!(
+                                    "HEX {}",
+                                    value
+                                        .as_bytes()
+                                        .iter()
+                                        .map(|byte| format!("{byte:02x}"))
+                                        .collect::<String>()
+                                )
+                            },
                             str::to_owned,
                         )
                     };
@@ -224,7 +237,13 @@ impl Trace {
     }
 
     pub fn upstream_response(&mut self) -> &mut history::Snapshot {
-        self.exchange.attempts.last_mut().unwrap().response.as_mut().unwrap()
+        self.exchange
+            .attempts
+            .last_mut()
+            .unwrap()
+            .response
+            .as_mut()
+            .unwrap()
     }
 
     pub fn error(&mut self, error: String) {
@@ -501,7 +520,10 @@ async fn call_diff(
 }
 
 fn history_error(error: rusqlite::Error) -> ApiError {
-    ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("无法读取请求历史：{error}"))
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("无法读取请求历史：{error}"),
+    )
 }
 
 #[derive(Deserialize)]

@@ -20,22 +20,6 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  refresh-inputs:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo generate-lockfile
-      - run: cargo fmt --all
-      - uses: actions/upload-artifact@v7
-        with:
-          name: refreshed-rust-inputs
-          path: |
-            Cargo.lock
-            src/*.rs
   format:
     name: Rust format
     runs-on: ubuntu-latest

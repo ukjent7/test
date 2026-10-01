@@ -10,18 +10,22 @@ Rust 编写的桌面网关，支持 Messages、Chat Completions、Responses 的�
 - 分别配置 StepFun 和 OpenCode Zen 地址与密钥；保存后立即用于新请求，并供下次启动使用。
 - 拉取两个上游的模型列表，选择并复制带路由前缀的模型 ID。
 - 复制 Grok Build 接入地址或配置片段。
-- 查看本次运行请求数、修补数量、错误及最近 30 条请求。
+- 查看本次运行请求数、修补数量、错误及本机最近 100 条请求；按 ID、模型或状态码筛选，或只查看错误。
 - 活动记录显示输入 token、缓存读取/写入、命中率及会话身份来源与指纹，区分明确为零和上游未报告。
-- 在活动记录中点击「查看差异」，分别查看请求和响应被修改的内容，红色表示修改前，绿色表示修改后；支持复制差异。
+- 在活动记录中点击「查看详情与差异」，查看主动修补、完整字节差异及原始请求/响应，支持复制完整详情。
 - 切换并记住深浅主题。
 
-活动记录只存在于内存中，包含模型、HTTP 状态、耗时、修补数量和被修改的区块。差异可能包含无签名思考文本，不记录请求头、API key 或未修改的正文；最多保留最近 30 条，退出后清空。每秒状态轮询只传输摘要，点击记录时才读取差异。
+完成或取消的请求写入 SQLite，按请求 ID 保留最近 100 条；重启后仍可查找，ID 继续递增，运行计数重新开始。保存客户端原始请求、每次上游尝试的 URL/头/正文/状态、客户端响应、缓存用量和网关错误。错误与中断保留已收到的字节并标记不完整，不截断正文。鉴权头和 Cookie 保存进程内加盐指纹，隐藏原值但仍可比较是否变化；完整正文会保留用户输入、思考、工具参数及会话字段。每秒状态轮询只查询摘要，点击记录时才读取完整详情。数据库写入失败会在活动页显示错误。
+
+数据库默认与设置文件同目录，文件名为 requests.sqlite3；Windows 默认 `%APPDATA%\MessagesGateway\requests.sqlite3`。`GATEWAY_DB` 可指定路径。插入与 100 条裁剪在同一事务内完成，SQLite 自动回收裁剪的页；无需独立数据库服务。
 
 缓存观测覆盖三个协议的 JSON/SSE 及 Zen 免费层合并响应。Messages 的总输入为普通输入 + 缓存读取 + 缓存写入；Chat/Responses 的总输入直接使用上游 prompt_tokens / input_tokens，不重复加缓存。SSE 的累计字段更新已有值，省略的字段沿用先前报告；未报告缓存字段保留 null，明确报告 0 才显示零。Chat 兼容 DeepSeek prompt_cache_hit_tokens。观测不修改原生响应正文，不等待完整流才转发。
 
-状态接口每条记录新增 cache（input_tokens、cache_read_tokens、cache_write_tokens）与 routing（source、fingerprint）。指纹使用本次进程随机种子和实际上游凭证计算，不保存原始会话/缓存键；同一账户、相同身份在本次运行内可关联，重启后指纹改变，记录清空。Zen 指纹对应实际发送的 x-opencode-session；其它上游仅观察客户端提供的标识，未提供时显示身份缺失，不推测服务端是否支持该路由信号。
+状态接口每条记录包含 cache（input_tokens、cache_read_tokens、cache_write_tokens）与 routing（source、fingerprint）。摘要中的指纹使用本次进程随机种子和实际上游凭证计算；同一账户、相同身份在本次运行内可关联，重启后新请求使用新指纹，旧记录保持原值。Zen 指纹对应实际发送的 x-opencode-session；其它上游仅观察客户端提供的标识，未提供时显示身份缺失，不推测服务端是否支持该路由信号。
 
-请求差异展示无签名 thinking 转成 text、空思考块或空助手消息的删除；数组删除后同时展示原始和转发位置。响应差异展示补齐的 thinking/signature，区分「字段不存在」、`null` 和 `""`；SSE 标记帧编号、事件类型与 content block index。已有签名、工具调用等未修改内容不会被误报。此视图比较 JSON 内容，不展示空白、键顺序或 HTTP 传输头的变化。
+主动修补说明保留 thinking/text、空块删除、模型前缀与字段补齐的原因。下方完整比较覆盖每次上游请求与原始客户端请求，以及最终上游响应与客户端响应；包括 URL、状态、框架可见的 HTTP 头和未经格式化的实体正文。正文按字节比较，不忽略空白、JSON 键顺序或 SSE data 行变化，显示增删位置与字节数；空格显示为 `\u0020`，Tab/CR/LF 显示为 `\t`/`\r`/`\n`，其它不可见字符也转义，非 UTF-8 片段显示十六进制。原始正文可完整展开，复制详情中的 byte 数组可无损还原。精确差异计算超时会明确标注并显示完整前后正文。此记录位于 HTTP 应用层，不记录 TLS、HTTP/2 帧或 chunked 分块格式。
+
+字节比较内嵌 [jsdiff 9.0.0](https://github.com/kpdecker/jsdiff) 的 diffArrays，使用默认严格比较；程序运行不访问 CDN。SQLite 使用 [rusqlite 0.40.2](https://docs.rs/rusqlite/0.40.2/rusqlite/) 的 bundled SQLite。
 
 设置保存在系统用户配置目录的 `MessagesGateway/settings.json`，Windows 为 `%APPDATA%\MessagesGateway\settings.json`，包含两边地址和配置的密钥；旧版设置自动补上默认 Zen 地址与空密钥。`GATEWAY_CONFIG` 可指定文件；`GATEWAY_UPSTREAM_BASE_URL`、`GATEWAY_OPENCODE_BASE_URL`、`GATEWAY_STEPFUN_API_KEY`、`GATEWAY_OPENCODE_API_KEY` 在启动时覆盖对应设置。设置写入成功后才更新实际转发配置。GUI 管理接口只接受本机与同源请求，状态接口只返回密钥是否已配置，编辑框留空保留已保存密钥；管理 API 显式传空字符串可清除对应密钥。
 
@@ -110,6 +114,8 @@ Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropi
 [最终线上接入验证](https://github.com/ukjent7/test/actions/runs/36792610882)：真实网关使用配置中的 public 密钥，客户端不带密钥，以 `opencode/mimo-v2.5-free` 发送普通非流式请求；网关修正免费层形态并返回 200 Chat JSON，内容为 OK。临时线上探测工作流已移除，常规 CI 继续使用本机夹具以保证回归可重复；历史探测可从对应 Actions 运行重放。
 
 CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单。缓存场景验证主请求 → 独立旁路 → 主请求、共享缓存旁路的实际会话 ID，以及已知用量夹具的 JSON/SSE 口径、累计字段更新、零与未报告、响应字节与首事件及时性；cache-identities.json 和 cache-observations.json 可重复核验。GUI E2E 保存两个上游的设置、模型列表、密钥隐藏、缓存记录的深浅色/窄窗口和重启持久化证据。夹具不会证明线上命中率已经提高。
+
+`tests/history_e2e.py` 验证逐字节请求/响应、头变化与鉴权隐藏、非法 JSON、HTTP/连接错误、分片 SSE/中断、并发裁剪与重启留存；产物包含 history-backup.sqlite3、原始正文、上游捕获、详情与 SHA-256 清单。GUI 保存空白差异、完整报错和错误筛选的证据。
 
 ## GitHub Actions 验证
 

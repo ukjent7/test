@@ -40,7 +40,7 @@ def run(binary, output):
                 wire = b"\xff\x00\xfe \t\r\n"
             self.send_response(status)
             self.send_header("Content-Type", "text/event-stream" if model.startswith("history-sse") else "application/json")
-            self.send_header("Content-Length", str(len(wire) + (100 if model == "history-sse-truncated" else 0)))
+            self.send_header("Content-Length", str(len(wire) + (100 if model in ("history-sse-truncated", "history-sse-cancel") else 0)))
             self.send_header("X-Fixture", "header  spaces")
             self.send_header("Set-Cookie", "PRIVATE_RESPONSE_COOKIE")
             self.end_headers()
@@ -52,7 +52,7 @@ def run(binary, output):
                 for offset in range(0, len(wire), 3):
                     self.wfile.write(wire[offset:offset + 3])
                     self.wfile.flush()
-            if model == "history-sse-truncated":
+            if model in ("history-sse-truncated", "history-sse-cancel"):
                 self.close_connection = True
 
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
@@ -62,6 +62,7 @@ def run(binary, output):
         port = sock.getsockname()[1]
     db = output.resolve() / "requests.sqlite3"
     db.unlink(missing_ok=True)
+    (output / "settings.json").unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "GATEWAY_CONFIG": str(output.resolve() / "settings.json"), "GATEWAY_DB": str(db),
            "GATEWAY_UPSTREAM_BASE_URL": f"http://127.0.0.1:{upstream.server_port}/v1",
@@ -122,7 +123,19 @@ def run(binary, output):
         report["cases"].append({"name": name, "status": "passed"})
 
     try:
+        process = subprocess.Popen([str(binary), "--headless"], env={**env, "GATEWAY_DB": str(output.resolve())},
+                                   stdout=log, stderr=log)
+        assert process.wait(timeout=10) != 0, "invalid database path was silently ignored"
+        passed("database-open-failure-is-explicit")
         launch()
+        with sqlite3.connect(db) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            assert http("POST", "/v1/messages", b'{"model":"history-storage-failed"}')[0] == 200
+            assert get("/ui/status")["history_error"], "failed persistence must be visible"
+            connection.rollback()
+        assert http("POST", "/v1/messages", b'{"model":"history-storage-recovered"}')[0] == 200
+        assert settled()["history_error"] is None
+        passed("database-write-failure-visible-and-recoverable")
         original = b'{ \t"model" : "stepfun/history-whitespace", "stream": false, "messages": [] }\r\n'
         status, wire = http("POST", "/v1/messages?space=a%20b", original)
         assert status == 200 and wire == normal_wire
@@ -184,6 +197,21 @@ def run(binary, output):
         assert not value["exchange"]["attempts"][0]["response"]["complete"]
         assert not value["exchange"]["response"]["complete"] and value["exchange"]["error"]
         passed("truncated-stream-partial-bytes-and-error")
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection.request("POST", "/v1/messages", b'{"model":"history-sse-cancel"}',
+                           {"Content-Type": "application/json"})
+        response = connection.getresponse()
+        first = b""
+        while not first.endswith(b"\r\n\r\n"):
+            first += response.read(1)
+        response.close()
+        connection.close()
+        release.set()
+        value = detail("history-sse-cancel")
+        assert value["call"]["result"] in ("取消", "失败")
+        assert value["exchange"]["response"]["body"] and not value["exchange"]["response"]["complete"]
+        passed("cancelled-stream-retains-partial-history")
 
         http("POST", "/ui/settings", json.dumps({"upstream_base_url": "http://127.0.0.1:1/v1"}).encode())
         assert http("POST", "/v1/messages", b'{"model":"history-connect-error"}')[0] == 502

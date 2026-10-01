@@ -162,26 +162,7 @@ async fn forward(
     url.set_query(uri.query());
     let client_streaming = request["stream"].as_bool().unwrap_or(false);
     let mut collapse = false;
-    let bytes = serde_json::to_vec(&request).unwrap();
-    trace.exchange.attempts.push(history::Attempt {
-        request: trace.snapshot(url.to_string(), None, &headers, bytes.clone(), true),
-        response: None,
-    });
-    let mut upstream = gateway
-        .client
-        .post(url.clone())
-        .headers(headers.clone())
-        .body(bytes)
-        .send()
-        .await
-        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
-    trace.exchange.attempts.last_mut().unwrap().response = Some(trace.snapshot(
-        String::new(),
-        Some(upstream.status().as_u16()),
-        upstream.headers(),
-        Vec::new(),
-        false,
-    ));
+    let mut upstream = send_upstream(gateway, &url, &headers, &request, trace).await?;
     if !anthropic && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
         trace.status = 403;
         let mut original_headers = upstream.headers().clone();
@@ -192,28 +173,7 @@ async fn forward(
         if free_error && let Some(change) = zen::prepare_free_body(&mut request, &endpoint) {
             trace.diff.request.push(change);
             collapse = !client_streaming;
-            let bytes = serde_json::to_vec(&request).unwrap();
-            trace.exchange.attempts.push(history::Attempt {
-                request: trace.snapshot(url.to_string(), None, &headers, bytes.clone(), true),
-                response: None,
-            });
-            upstream = gateway
-                .client
-                .post(url)
-                .headers(headers)
-                .body(bytes)
-                .send()
-                .await
-                .map_err(|error| {
-                    ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string())
-                })?;
-            trace.exchange.attempts.last_mut().unwrap().response = Some(trace.snapshot(
-                String::new(),
-                Some(upstream.status().as_u16()),
-                upstream.headers(),
-                Vec::new(),
-                false,
-            ));
+            upstream = send_upstream(gateway, &url, &headers, &request, trace).await?;
         } else {
             return Ok((StatusCode::FORBIDDEN, original_headers, bytes).into_response());
         }
@@ -238,7 +198,11 @@ async fn forward(
     if !status.is_success() {
         let mut trace = trace_slot.take().unwrap();
         trace.exchange.response = Some(trace.snapshot(
-            String::new(), Some(status.as_u16()), &headers, Vec::new(), false,
+            String::new(),
+            Some(status.as_u16()),
+            &headers,
+            Vec::new(),
+            false,
         ));
         let stream = async_stream::stream! {
             let mut stream = upstream.bytes_stream();
@@ -269,7 +233,11 @@ async fn forward(
         let mut trace = trace_slot.take().unwrap();
         trace.result = "取消";
         trace.exchange.response = Some(trace.snapshot(
-            String::new(), Some(status.as_u16()), &headers, Vec::new(), false,
+            String::new(),
+            Some(status.as_u16()),
+            &headers,
+            Vec::new(),
+            false,
         ));
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
         let stream = async_stream::stream! {
@@ -344,6 +312,56 @@ async fn forward(
     let mut response = Response::new(body);
     *response.status_mut() = status;
     *response.headers_mut() = headers;
+    Ok(response)
+}
+
+async fn send_upstream(
+    gateway: &Gateway,
+    url: &reqwest::Url,
+    headers: &HeaderMap,
+    body: &Value,
+    trace: &mut Trace,
+) -> Result<reqwest::Response, ApiError> {
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut request = gateway
+        .client
+        .post(url.clone())
+        .headers(headers.clone())
+        .body(bytes.clone())
+        .build()
+        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    // Make protocol defaults explicit so the recorded headers match the actual request.
+    let host = url.port().map_or_else(
+        || url.host_str().unwrap().to_owned(),
+        |port| format!("{}:{port}", url.host_str().unwrap()),
+    );
+    request
+        .headers_mut()
+        .insert(header::HOST, host.parse().unwrap());
+    request.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        bytes.len().to_string().parse().unwrap(),
+    );
+    request
+        .headers_mut()
+        .entry(header::ACCEPT)
+        .or_insert("*/*".parse().unwrap());
+    trace.exchange.attempts.push(history::Attempt {
+        request: trace.snapshot(url.to_string(), None, request.headers(), bytes, true),
+        response: None,
+    });
+    let response = gateway
+        .client
+        .execute(request)
+        .await
+        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    trace.exchange.attempts.last_mut().unwrap().response = Some(trace.snapshot(
+        String::new(),
+        Some(response.status().as_u16()),
+        response.headers(),
+        Vec::new(),
+        false,
+    ));
     Ok(response)
 }
 
