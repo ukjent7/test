@@ -3,13 +3,14 @@
 mod app;
 mod cache;
 mod desktop;
+mod history;
 mod zen;
 
 use std::{env, io, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json,
-    body::{Body, Bytes},
+    body::{Body, Bytes, to_bytes},
     extract::{OriginalUri, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
@@ -68,15 +69,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn messages(
     State(gateway): State<Arc<Gateway>>,
     OriginalUri(uri): OriginalUri,
-    mut headers: HeaderMap,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let mut request: Value = serde_json::from_slice(&body)
-        .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
+    let request = serde_json::from_slice::<Value>(&body);
     let mut trace = Trace::new(
         &gateway,
-        request["model"].as_str().unwrap_or("未知模型").to_owned(),
+        request
+            .as_ref()
+            .ok()
+            .and_then(|value| value["model"].as_str())
+            .unwrap_or("未知模型")
+            .to_owned(),
     );
+    trace.exchange.request = trace.snapshot(uri.to_string(), None, &headers, body.to_vec(), true);
+    let mut trace = Some(trace);
+    let response = match request {
+        Ok(request) => forward(&gateway, uri, headers, request, &mut trace).await,
+        Err(error) => Err(ApiError(StatusCode::BAD_REQUEST, error.to_string())),
+    };
+    let response = response.unwrap_or_else(|error| {
+        let trace = trace.as_mut().unwrap();
+        trace.status = error.0.as_u16();
+        trace.error(error.1.clone());
+        error.into_response()
+    });
+    if let Some(mut trace) = trace {
+        let (parts, body) = response.into_parts();
+        let bytes = to_bytes(body, usize::MAX).await.map_err(|error| {
+            trace.error(error.to_string());
+            ApiError(StatusCode::BAD_GATEWAY, error.to_string())
+        })?;
+        trace.exchange.response = Some(trace.snapshot(
+            String::new(),
+            Some(parts.status.as_u16()),
+            &parts.headers,
+            bytes.to_vec(),
+            true,
+        ));
+        return Ok(Response::from_parts(parts, Body::from(bytes)));
+    }
+    Ok(response)
+}
+
+async fn forward(
+    gateway: &Arc<Gateway>,
+    uri: axum::http::Uri,
+    mut headers: HeaderMap,
+    mut request: Value,
+    trace_slot: &mut Option<Trace>,
+) -> Result<Response, ApiError> {
+    let trace = trace_slot.as_mut().unwrap();
     let endpoint = uri
         .path()
         .trim_start_matches("/v1")
@@ -119,37 +162,58 @@ async fn messages(
     url.set_query(uri.query());
     let client_streaming = request["stream"].as_bool().unwrap_or(false);
     let mut collapse = false;
+    let bytes = serde_json::to_vec(&request).unwrap();
+    trace.exchange.attempts.push(history::Attempt {
+        request: trace.snapshot(url.to_string(), None, &headers, bytes.clone(), true),
+        response: None,
+    });
     let mut upstream = gateway
         .client
         .post(url.clone())
         .headers(headers.clone())
-        .body(serde_json::to_vec(&request).unwrap())
+        .body(bytes)
         .send()
         .await
         .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+    trace.exchange.attempts.last_mut().unwrap().response = Some(trace.snapshot(
+        String::new(),
+        Some(upstream.status().as_u16()),
+        upstream.headers(),
+        Vec::new(),
+        false,
+    ));
     if !anthropic && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
         trace.status = 403;
         let mut original_headers = upstream.headers().clone();
         strip_hop_headers(&mut original_headers);
-        let bytes = upstream
-            .bytes()
-            .await
-            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        let bytes = read_upstream(upstream, trace).await?;
         let free_error = serde_json::from_slice::<Value>(&bytes)
             .is_ok_and(|error| error["error"]["type"] == "FreeTierError");
         if free_error && let Some(change) = zen::prepare_free_body(&mut request, &endpoint) {
             trace.diff.request.push(change);
             collapse = !client_streaming;
+            let bytes = serde_json::to_vec(&request).unwrap();
+            trace.exchange.attempts.push(history::Attempt {
+                request: trace.snapshot(url.to_string(), None, &headers, bytes.clone(), true),
+                response: None,
+            });
             upstream = gateway
                 .client
                 .post(url)
                 .headers(headers)
-                .body(serde_json::to_vec(&request).unwrap())
+                .body(bytes)
                 .send()
                 .await
                 .map_err(|error| {
                     ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string())
                 })?;
+            trace.exchange.attempts.last_mut().unwrap().response = Some(trace.snapshot(
+                String::new(),
+                Some(upstream.status().as_u16()),
+                upstream.headers(),
+                Vec::new(),
+                false,
+            ));
         } else {
             return Ok((StatusCode::FORBIDDEN, original_headers, bytes).into_response());
         }
@@ -163,10 +227,7 @@ async fn messages(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.split(';').next().unwrap_or("").trim() == "text/event-stream");
     if collapse && status.is_success() && is_sse {
-        let bytes = upstream
-            .bytes()
-            .await
-            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        let bytes = read_upstream(upstream, trace).await?;
         let value = zen::collapse(&bytes, &endpoint)?;
         trace.cache.observe(&endpoint, &value);
         headers.remove(header::CONTENT_LENGTH);
@@ -175,17 +236,28 @@ async fn messages(
         return Ok((status, headers, serde_json::to_vec(&value).unwrap()).into_response());
     }
     if !status.is_success() {
+        let mut trace = trace_slot.take().unwrap();
+        trace.exchange.response = Some(trace.snapshot(
+            String::new(), Some(status.as_u16()), &headers, Vec::new(), false,
+        ));
         let stream = async_stream::stream! {
-            let mut trace = trace;
             let mut stream = upstream.bytes_stream();
             while let Some(chunk) = stream.next().await {
-                if chunk.is_err() {
-                    trace.result = "失败";
-                    yield chunk;
-                    return;
+                match &chunk {
+                    Ok(bytes) => {
+                        trace.upstream_response().body.extend_from_slice(bytes);
+                        trace.exchange.response.as_mut().unwrap().body.extend_from_slice(bytes);
+                    }
+                    Err(error) => {
+                        trace.error(error.to_string());
+                        yield chunk;
+                        return;
+                    }
                 }
                 yield chunk;
             }
+            trace.upstream_response().complete = true;
+            trace.exchange.response.as_mut().unwrap().complete = true;
         };
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
@@ -194,10 +266,13 @@ async fn messages(
     }
     headers.remove(header::CONTENT_LENGTH);
     let body = if is_sse {
+        let mut trace = trace_slot.take().unwrap();
         trace.result = "取消";
+        trace.exchange.response = Some(trace.snapshot(
+            String::new(), Some(status.as_u16()), &headers, Vec::new(), false,
+        ));
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
         let stream = async_stream::stream! {
-            let mut trace = trace;
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
             let mut line_length = 0;
@@ -206,11 +281,12 @@ async fn messages(
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(error) => {
-                        trace.result = "失败";
+                        trace.error(error.to_string());
                         yield Err::<Bytes, io::Error>(io::Error::other(error));
                         return;
                     }
                 };
+                trace.upstream_response().body.extend_from_slice(&chunk);
                 for byte in chunk {
                     let blank = byte == b'\n'
                         && (line_length == 0
@@ -226,6 +302,7 @@ async fn messages(
                         let (output, changes) = normalize_sse(&frame, frame_number, &endpoint, &mut trace.cache);
                         trace.repairs += changes.len();
                         trace.diff.response.extend(changes);
+                        trace.exchange.response.as_mut().unwrap().body.extend_from_slice(&output);
                         yield Ok(Bytes::from(output));
                         frame.clear();
                     }
@@ -235,16 +312,16 @@ async fn messages(
                 let (output, changes) = normalize_sse(&frame, frame_number + 1, &endpoint, &mut trace.cache);
                 trace.repairs += changes.len();
                 trace.diff.response.extend(changes);
+                trace.exchange.response.as_mut().unwrap().body.extend_from_slice(&output);
                 yield Ok(Bytes::from(output));
             }
             trace.result = "完成";
+            trace.upstream_response().complete = true;
+            trace.exchange.response.as_mut().unwrap().complete = true;
         };
         Body::from_stream(stream)
     } else {
-        let mut bytes = upstream
-            .bytes()
-            .await
-            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        let mut bytes = read_upstream(upstream, trace).await?;
         match serde_json::from_slice::<Value>(&bytes) {
             Ok(mut value) => {
                 trace.cache.observe(&endpoint, &value);
@@ -268,6 +345,18 @@ async fn messages(
     *response.status_mut() = status;
     *response.headers_mut() = headers;
     Ok(response)
+}
+
+async fn read_upstream(upstream: reqwest::Response, trace: &mut Trace) -> Result<Bytes, ApiError> {
+    let mut stream = upstream.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk
+            .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.without_url().to_string()))?;
+        trace.upstream_response().body.extend_from_slice(&bytes);
+    }
+    let response = trace.upstream_response();
+    response.complete = true;
+    Ok(Bytes::copy_from_slice(&response.body))
 }
 
 fn configured_key(headers: &mut HeaderMap, key: &str) -> Result<(), ApiError> {

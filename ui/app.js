@@ -38,18 +38,22 @@ async function copy(text) {
 }
 
 function renderCalls(calls) {
-  const key = JSON.stringify(calls);
+  const filter = byId('call-filter').value.trim().toLowerCase();
+  const errors = byId('errors-only').checked;
+  const key = JSON.stringify([calls, filter, errors]);
   if (callsKey === key) return;
   callsKey = key;
-  if (!calls.length) return;
   const list = byId('activity-list');
   list.replaceChildren();
-  for (const call of calls) {
+  const selected = calls.filter(call => (!errors || call.result === '失败' || call.status >= 400)
+    && (!filter || [String(call.id), call.model, String(call.status), call.result].some(value => value.toLowerCase().includes(filter))));
+  if (!selected.length) diffLine(list, 'diff-empty', '没有符合条件的请求');
+  for (const call of selected) {
     const row = document.createElement('div');
     row.className = 'call';
     row.innerHTML = '<div><div class="model"></div><div class="time"></div></div><span class="outcome"></span><span class="duration"></span><span class="repair"></span>';
     row.querySelector('.model').textContent = call.model;
-    row.querySelector('.time').textContent = new Date(call.timestamp).toLocaleTimeString('zh-CN', {hour12:false});
+    row.querySelector('.time').textContent = `#${call.id} · ${new Date(call.timestamp).toLocaleString('zh-CN', {hour12:false})}`;
     row.querySelector('.outcome').textContent = `${call.result} ${call.status}`;
     row.querySelector('.outcome').classList.toggle('failed', call.result === '失败');
     row.querySelector('.duration').textContent = `${call.duration_ms} ms`;
@@ -69,7 +73,7 @@ function renderCalls(calls) {
     row.firstElementChild.append(usage, routing);
     const button = document.createElement('button');
     button.className = 'text-button diff-button';
-    button.textContent = `查看差异 · 请求 ${call.request_changes} / 响应 ${call.response_changes}`;
+    button.textContent = `查看详情与差异 · 修补 ${call.request_changes} / ${call.response_changes}`;
     button.setAttribute('aria-label', `查看差异 #${call.id}`);
     button.addEventListener('click', () => showDiff(call.id));
     row.firstElementChild.append(button);
@@ -84,6 +88,80 @@ function diffLine(parent, kind, text) {
   parent.append(line);
 }
 
+const visible = value => JSON.stringify(value).replace(/[\s\u200b-\u200f\u2060-\u206f\ufeff]/gu,
+  char => `\\u${char.codePointAt(0).toString(16).padStart(4, '0')}`);
+
+function byteText(bytes) {
+  try {
+    return visible(new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(new Uint8Array(bytes)));
+  } catch {
+    return `HEX ${bytes.map(byte => byte.toString(16).padStart(2, '0')).join(' ')}`;
+  }
+}
+
+function rawSnapshot(parent, title, snapshot, testid) {
+  const details = document.createElement('details');
+  details.dataset.testid = testid;
+  const summary = document.createElement('summary');
+  summary.textContent = `${title} · ${snapshot.body.length} 字节 · ${snapshot.complete ? '完整' : '不完整'}`;
+  details.append(summary);
+  diffLine(details, 'diff-raw', JSON.stringify({target: snapshot.target, status: snapshot.status, headers: snapshot.headers}, null, 2));
+  diffLine(details, 'diff-raw', byteText(snapshot.body));
+  parent.append(details);
+}
+
+function wireDifference(parent, title, before, after, testid) {
+  const section = document.createElement('section');
+  section.dataset.testid = testid;
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  section.append(heading);
+  const metadata = snapshot => {
+    const values = {target: snapshot.target, status: snapshot.status, complete: snapshot.complete};
+    for (const [name, value] of snapshot.headers) (values[`header/${name}`] ||= []).push(value);
+    return values;
+  };
+  const left = metadata(before), right = metadata(after);
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (JSON.stringify(left[key]) === JSON.stringify(right[key])) continue;
+    diffLine(section, 'removed', `− ${key}: ${Object.hasOwn(left, key) ? visible(left[key]) : '（不存在）'}`);
+    diffLine(section, 'added', `+ ${key}: ${Object.hasOwn(right, key) ? visible(right[key]) : '（不存在）'}`);
+  }
+  const changes = ByteDiff.diffArrays(before.body, after.body, {timeout: 1000});
+  if (!changes) {
+    diffLine(section, 'diff-empty', '精确差异计算超时；以下显示完整前后正文，未截断。');
+    diffLine(section, 'removed', `− ${byteText(before.body)}`);
+    diffLine(section, 'added', `+ ${byteText(after.body)}`);
+  } else {
+    let oldOffset = 0, newOffset = 0, changed = false;
+    for (const change of changes) {
+      if (change.removed || change.added) {
+        changed = true;
+        diffLine(section, change.removed ? 'removed' : 'added',
+          `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.count} 字节: ${byteText(change.value)}`);
+      }
+      if (!change.added) oldOffset += change.count;
+      if (!change.removed) newOffset += change.count;
+    }
+    if (!changed) diffLine(section, 'diff-empty', '正文逐字节相同');
+  }
+  parent.append(section);
+}
+
+function renderExchange(exchange) {
+  const content = byId('diff-content');
+  if (exchange.error) diffLine(content, 'removed', `错误：${exchange.error}`);
+  rawSnapshot(content, '原始请求', exchange.request, 'wire-original-request');
+  for (const [index, attempt] of exchange.attempts.entries()) {
+    wireDifference(content, `上游尝试 ${index + 1} · 请求完整差异`, exchange.request, attempt.request, `wire-request-${index + 1}`);
+    rawSnapshot(content, `上游尝试 ${index + 1} · 实际请求`, attempt.request, `wire-upstream-request-${index + 1}`);
+    if (attempt.response) rawSnapshot(content, `上游尝试 ${index + 1} · 实际响应`, attempt.response, `wire-upstream-response-${index + 1}`);
+    if (index === exchange.attempts.length - 1 && attempt.response && exchange.response)
+      wireDifference(content, `上游尝试 ${index + 1} · 响应完整差异`, attempt.response, exchange.response, `wire-response-${index + 1}`);
+  }
+  if (exchange.response) rawSnapshot(content, '客户端响应', exchange.response, 'wire-downstream-response');
+}
+
 function renderDiff(diff) {
   const content = byId('diff-content');
   content.replaceChildren();
@@ -93,7 +171,7 @@ function renderDiff(diff) {
     const heading = document.createElement('h3');
     heading.textContent = title;
     section.append(heading);
-    if (!diff[direction].length) diffLine(section, 'diff-empty', '未记录内容修改');
+    if (!diff[direction].length) diffLine(section, 'diff-empty', '未记录主动修补；完整字节差异见下方');
     for (const change of diff[direction]) {
       const item = document.createElement('div');
       item.className = 'diff-item';
@@ -111,12 +189,12 @@ function renderDiff(diff) {
       }
       if (Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
         for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
-          const format = value => Object.hasOwn(value, key) ? JSON.stringify(value[key], null, 2) : '（字段不存在）';
+          const format = value => Object.hasOwn(value, key) ? visible(value[key]) : '（字段不存在）';
           diffLine(item, 'removed', `− ${key}: ${format(change.before)}`);
           diffLine(item, 'added', `+ ${key}: ${format(change.after)}`);
         }
       } else {
-        diffLine(item, 'removed', `− ${JSON.stringify(change.before, null, 2)}`);
+        diffLine(item, 'removed', `− ${visible(change.before)}`);
         diffLine(item, 'added', '+ （已删除）');
       }
       section.append(item);
@@ -138,6 +216,7 @@ async function showDiff(id) {
     diffDetail = detail;
     byId('diff-meta').textContent = `#${id} · ${detail.call.model} · ${detail.call.result} ${detail.call.status}`;
     renderDiff(detail.diff);
+    renderExchange(detail.exchange);
     byId('copy-diff').disabled = false;
   } catch (error) {
     if (sequence === diffRequest && byId('diff-dialog').open) byId('diff-content').textContent = error.message;
@@ -167,6 +246,8 @@ async function refresh() {
     byId('connection').textContent = current.enabled ? '网关已连接' : '服务已连接 · 转发已停止';
     byId('footer-dot').classList.add('connected');
     renderCalls(current.calls);
+    byId('history-error').hidden = !current.history_error;
+    byId('history-error').textContent = current.history_error || '';
   } catch {
     byId('state').textContent = '连接已断开';
     byId('state').classList.remove('running');
@@ -175,6 +256,9 @@ async function refresh() {
     toggle.disabled = true;
   }
 }
+
+byId('call-filter').addEventListener('input', () => current && renderCalls(current.calls));
+byId('errors-only').addEventListener('change', () => current && renderCalls(current.calls));
 
 for (const tab of document.querySelectorAll('[role="tab"]')) {
   tab.addEventListener('click', () => {

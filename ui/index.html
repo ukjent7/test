@@ -6,6 +6,7 @@
   <title>Messages Gateway</title>
   <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
   <link rel="stylesheet" href="app.css">
+  <script src="byte-diff.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -69,11 +70,13 @@
     </section>
 
     <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
-      <div class="section-head"><h2>近期请求</h2><span class="subtle">最近 30 条 · 本次运行</span></div>
+      <div class="section-head"><h2>近期请求</h2><span class="subtle">最近 100 条 · 本机留存</span></div>
+      <div class="history-filter"><input id="call-filter" aria-label="筛选请求" placeholder="请求 ID、模型、状态码" type="search"><label><input id="errors-only" type="checkbox">仅错误</label></div>
       <div class="list activity-list" data-testid="activity-list" id="activity-list">
         <div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从 Grok Build 发送一条消息，它会出现在这里。</p></div>
       </div>
-      <p class="privacy-note">缓存用量与会话指纹仅保留在本次运行；未报告不代表零命中。差异可能包含被修改的思考文本，不记录请求头或未修改的正文。</p>
+      <p id="history-error" class="field-error" role="alert" hidden></p>
+      <p class="privacy-note">最近 100 条请求及完整正文保存在本机数据库，重启后可查。鉴权与 Cookie 隐藏原值；空白差异显式显示。未报告缓存用量不代表零命中。</p>
     </section>
   </main>
 
@@ -83,7 +86,7 @@
   <dialog id="diff-dialog" aria-labelledby="diff-title">
     <div class="dialog-heading"><h2 id="diff-title">请求 / 响应差异</h2><button type="button" class="icon" id="close-diff" aria-label="关闭差异">×</button></div>
     <p class="dialog-description" id="diff-meta"></p>
-    <div class="diff-legend"><span class="removed">− 修改前</span><span class="added">+ 修改后</span><span>仅显示被修改的内容</span></div>
+    <div class="diff-legend"><span class="removed">− 修改前</span><span class="added">+ 修改后</span><span>空格 \u0020 · Tab \t · CR \r · LF \n</span></div>
     <div id="diff-content" data-testid="diff-content"></div>
     <div class="dialog-actions"><button type="button" class="pill" id="copy-diff" disabled>复制差异</button></div>
   </dialog>

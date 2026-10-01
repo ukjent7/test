@@ -312,7 +312,10 @@ def run(binary, checker, output):
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     port = free_port()
+    database = output.resolve() / "requests.sqlite3"
+    database.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_CONFIG": str(output.resolve() / "settings.json"),
+           "GATEWAY_DB": str(database),
            "GATEWAY_LISTEN": f"127.0.0.1:{port}",
            "HTTP_PROXY": f"http://127.0.0.1:{upstream.server_port}",
            "http_proxy": f"http://127.0.0.1:{upstream.server_port}",
@@ -775,6 +778,13 @@ def run(binary, checker, output):
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "Zen 免费层要求流式与基础工具" for change in detail["diff"]["request"])
         assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail)
+        exchange = detail["exchange"]
+        assert len(exchange["attempts"]) == 2
+        assert exchange["attempts"][0]["response"]["status"] == 403
+        assert exchange["attempts"][1]["response"]["status"] == 200
+        assert bytes(exchange["attempts"][1]["response"]["body"]) == ZEN_WIRE
+        assert bytes(exchange["response"]["body"]) == wire
+        assert "PRIVATE_FREE_MESSAGE" in bytes(exchange["request"]["body"]).decode()
         assert detail["call"]["cache"] == {"input_tokens": 225, "cache_read_tokens": 0, "cache_write_tokens": 0}
         (output / "free-request-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("free-json-collapses-real-mimo-stream")

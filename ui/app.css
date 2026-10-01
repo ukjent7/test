@@ -117,6 +117,13 @@ summary { cursor:pointer; color:var(--secondary); font-size:11px; padding:12px 1
 .diff-item .removed { background:var(--red-soft); }
 .diff-item .added { background:var(--green-soft); }
 .diff-empty { color:var(--muted); background:var(--bg); padding:12px; border-radius:8px; font-size:11px; }
+.history-filter { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+.history-filter>input { flex:1; min-width:0; }
+.history-filter label { display:flex; align-items:center; gap:5px; white-space:nowrap; margin:0; }
+.history-filter label input { width:auto; }
+#diff-content>section pre,.diff-raw { margin:0; padding:7px 12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+#diff-content>section>.removed { background:var(--red-soft); }
+#diff-content>section>.added { background:var(--green-soft); }
 .privacy-note { margin:12px 2px; font-size:10.5px; color:var(--muted); }
 footer { position:fixed; bottom:0; left:0; right:0; height:37px; display:flex; align-items:center; gap:6px; border-top:1px solid var(--line); background:var(--bg); color:var(--muted); font-size:10px; padding:0 28px; }
 .footer-dot { width:5px; height:5px; background:var(--muted); border-radius:50%; }
