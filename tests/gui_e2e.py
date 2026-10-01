@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import threading
@@ -27,6 +28,11 @@ def run(binary, output):
     report = {"status": "running", "cases": [], "commit": os.environ.get("GITHUB_SHA"),
               "gateway_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
               "renderer": "native-WebView2" if os.name == "nt" else "Chromium + native-WebKit-smoke"}
+    copied_binary = output.resolve() / binary.name
+    shutil.copy2(binary, copied_binary)
+    binary = copied_binary
+    launch_cwd = output.resolve() / "other-launch-directory"
+    launch_cwd.mkdir(exist_ok=True)
     upstream_calls = []
     model_calls = []
 
@@ -90,10 +96,9 @@ def run(binary, output):
     database = output.resolve() / "requests.sqlite3"
     database.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
-           "GATEWAY_CONFIG": str(settings_path),
-           "GATEWAY_DB": str(database),
-           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*",
-           "WEBVIEW2_USER_DATA_FOLDER": str(output.resolve() / "webview-profile")}
+           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*"}
+    for name in ("GATEWAY_CONFIG", "GATEWAY_DB", "WEBVIEW2_USER_DATA_FOLDER"):
+        env.pop(name, None)
     env.pop("GATEWAY_UPSTREAM_BASE_URL", None)
     for name in ("GATEWAY_OPENCODE_BASE_URL", "GATEWAY_STEPFUN_API_KEY", "GATEWAY_OPENCODE_API_KEY"):
         env.pop(name, None)
@@ -107,7 +112,7 @@ def run(binary, output):
 
     def launch(headless=False):
         return subprocess.Popen([str(binary), *(["--headless"] if headless else [])],
-                                env=env, stdout=log, stderr=log)
+                                env=env, cwd=launch_cwd, stdout=log, stderr=log)
 
     def wait_ready():
         for _ in range(300):
@@ -164,6 +169,11 @@ def run(binary, output):
         expect(page.get_by_role("heading", name="Messages Gateway", exact=True)).to_be_visible()
         expect(page.get_by_test_id("gateway-state")).to_have_text("运行中")
         expect(page.get_by_test_id("endpoint")).to_have_text(address + "/v1")
+        assert (output / "webview").is_dir(), "native WebView must use the program directory"
+        assert not list(launch_cwd.iterdir()), "runtime files must not follow the working directory"
+        (output / "runtime-paths.json").write_text(json.dumps({"program": str(binary), "cwd": str(launch_cwd),
+            "settings": str(settings_path), "database": str(database), "webview": str(output.resolve() / "webview")}, indent=2))
+        passed("portable-default-webview-config-and-database-paths")
         passed("native-window-and-live-state")
         page.get_by_role("button", name="复制地址", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("已复制")
@@ -496,7 +506,7 @@ def run(binary, output):
         log.close()
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         manifest = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json"}
+                    for path in sorted(output.iterdir()) if path.is_file() and path.name != "sha256.json" and path.resolve() != binary}
         (output / "sha256.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"GUI E2E passed: {len(report['cases'])} cases; evidence: {output}")
 

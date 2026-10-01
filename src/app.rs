@@ -353,17 +353,20 @@ fn messages_url(base: &str) -> Result<reqwest::Url, ApiError> {
     Ok(url)
 }
 
+pub(crate) fn program_directory() -> io::Result<PathBuf> {
+    let mut path = env::current_exe()?;
+    path.pop();
+    Ok(path)
+}
+
 pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std::error::Error>> {
     let listen: SocketAddr = env::var("GATEWAY_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8789".into())
         .parse()?;
+    let directory = program_directory()?;
     let settings_path = env::var_os("GATEWAY_CONFIG")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::config_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("MessagesGateway/settings.json")
-        });
+        .unwrap_or_else(|| directory.join("settings.json"));
     let mut settings = match fs::read(&settings_path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {

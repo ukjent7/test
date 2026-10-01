@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -87,9 +88,9 @@ def run(binary, output):
         assert status == 200, wire
         return json.loads(wire)
 
-    def launch():
+    def launch(executable=binary, environment=env, cwd=None):
         nonlocal process
-        process = subprocess.Popen([str(binary), "--headless"], env=env, stdout=log, stderr=log)
+        process = subprocess.Popen([str(executable), "--headless"], env=environment, cwd=cwd, stdout=log, stderr=log)
         for _ in range(200):
             if process.poll() is not None:
                 raise RuntimeError("gateway exited during startup")
@@ -250,6 +251,37 @@ def run(binary, output):
         with sqlite3.connect(db) as source, sqlite3.connect(output / "history-backup.sqlite3") as backup:
             source.backup(backup)
         (output / "upstream-captures.json").write_text(json.dumps(captures, indent=2), encoding="utf-8")
+        process.terminate()
+        process.wait(timeout=10)
+        portable = output.resolve() / "便携 网关"
+        portable.mkdir(exist_ok=True)
+        portable_binary = portable / binary.name
+        shutil.copy2(binary, portable_binary)
+        launch_cwd = output.resolve() / "other-launch-directory"
+        launch_cwd.mkdir(exist_ok=True)
+        outside = output.resolve() / "unused-user-directory"
+        portable_env = {**env, "APPDATA": str(outside), "LOCALAPPDATA": str(outside),
+                        "XDG_CONFIG_HOME": str(outside), "XDG_DATA_HOME": str(outside)}
+        for name in ("GATEWAY_CONFIG", "GATEWAY_DB"):
+            portable_env.pop(name, None)
+        for name in ("settings.json", "requests.sqlite3"):
+            (portable / name).unlink(missing_ok=True)
+        launch(portable_binary, portable_env, launch_cwd)
+        assert (portable / "requests.sqlite3").is_file()
+        assert http("POST", "/ui/settings", json.dumps({"upstream_base_url": env["GATEWAY_UPSTREAM_BASE_URL"]}).encode())[0] == 204
+        assert (portable / "settings.json").is_file()
+        assert http("POST", "/v1/messages", b'{"model":"portable-history"}')[0] == 200
+        portable_calls = settled()["calls"]
+        assert len(portable_calls) == 1
+        process.terminate()
+        process.wait(timeout=10)
+        launch(portable_binary, portable_env, launch_cwd)
+        assert settled()["calls"] == portable_calls
+        assert not list(launch_cwd.iterdir()) and not outside.exists()
+        (output / "portable-paths.json").write_text(json.dumps({"program": str(portable_binary),
+            "cwd": str(launch_cwd), "settings": str(portable / "settings.json"),
+            "database": str(portable / "requests.sqlite3"), "calls": portable_calls}, indent=2), encoding="utf-8")
+        passed("portable-defaults-ignore-cwd-and-user-directories-and-survive-restart")
         report["status"] = "passed"
     except BaseException as error:
         report.update(status="failed", error=repr(error))

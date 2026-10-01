@@ -17,7 +17,7 @@ Rust 编写的桌面网关，支持 Messages、Chat Completions、Responses 的�
 
 完成或取消的请求写入 SQLite，按请求 ID 保留最近 100 条；重启后仍可查找，ID 继续递增，运行计数重新开始。保存客户端原始请求、每次上游尝试的 URL/头/正文/状态、客户端响应、缓存用量和网关错误。错误与中断保留已收到的字节并标记不完整，不截断正文。鉴权头和 Cookie 保存进程内加盐指纹，隐藏原值但仍可比较是否变化；完整正文会保留用户输入、思考、工具参数及会话字段。每秒状态轮询只查询摘要，点击记录时才读取完整详情。数据库写入失败会在活动页显示错误。
 
-数据库默认与设置文件同目录，文件名为 requests.sqlite3；Windows 默认 `%APPDATA%\MessagesGateway\requests.sqlite3`。`GATEWAY_DB` 可指定路径。插入与 100 条裁剪在同一事务内完成，SQLite 自动回收裁剪的页；无需独立数据库服务。
+数据库默认与设置文件同目录，文件名为 requests.sqlite3，默认放在程序所在目录。`GATEWAY_DB` 可显式指定路径。插入与 100 条裁剪在同一事务内完成，SQLite 自动回收裁剪的页；无需独立数据库服务。
 
 缓存观测覆盖三个协议的 JSON/SSE 及 Zen 免费层合并响应。Messages 的总输入为普通输入 + 缓存读取 + 缓存写入；Chat/Responses 的总输入直接使用上游 prompt_tokens / input_tokens，不重复加缓存。SSE 的累计字段更新已有值，省略的字段沿用先前报告；未报告缓存字段保留 null，明确报告 0 才显示零。Chat 兼容 DeepSeek prompt_cache_hit_tokens。观测不修改原生响应正文，不等待完整流才转发。
 
@@ -27,7 +27,7 @@ Rust 编写的桌面网关，支持 Messages、Chat Completions、Responses 的�
 
 字节比较内嵌 [jsdiff 9.0.0](https://github.com/kpdecker/jsdiff) 的 diffArrays，使用默认严格比较；程序运行不访问 CDN。SQLite 使用 [rusqlite 0.40.2](https://docs.rs/rusqlite/0.40.2/rusqlite/) 的 bundled SQLite。
 
-设置保存在系统用户配置目录的 `MessagesGateway/settings.json`，Windows 为 `%APPDATA%\MessagesGateway\settings.json`，包含两边地址和配置的密钥；旧版设置自动补上默认 Zen 地址与空密钥。`GATEWAY_CONFIG` 可指定文件；`GATEWAY_UPSTREAM_BASE_URL`、`GATEWAY_OPENCODE_BASE_URL`、`GATEWAY_STEPFUN_API_KEY`、`GATEWAY_OPENCODE_API_KEY` 在启动时覆盖对应设置。设置写入成功后才更新实际转发配置。GUI 管理接口只接受本机与同源请求，状态接口只返回密钥是否已配置，编辑框留空保留已保存密钥；管理 API 显式传空字符串可清除对应密钥。
+所有默认运行文件跟随程序所在目录：settings.json 保存设置与密钥，requests.sqlite3 保存请求历史，webview/ 保存桌面浏览器的缓存、Cookie 和主题数据；临时设置文件及 SQLite 日志也在同目录。以可执行文件位置为准，不跟随启动时的工作目录，不默认使用 AppData/XDG 用户目录；目录不可写时显示失败，不回退到用户目录。已有设置、数据库和 WebView 数据可放到这些位置继续使用。`GATEWAY_CONFIG`、`GATEWAY_DB` 与 `WEBVIEW2_USER_DATA_FOLDER` 保留显式路径覆盖；旧版设置自动补上默认 Zen 地址与空密钥。`GATEWAY_UPSTREAM_BASE_URL`、`GATEWAY_OPENCODE_BASE_URL`、`GATEWAY_STEPFUN_API_KEY`、`GATEWAY_OPENCODE_API_KEY` 在启动时覆盖对应设置。设置写入成功后才更新实际转发配置。GUI 管理接口只接受本机与同源请求，状态接口只返回密钥是否已配置，编辑框留空保留已保存密钥；管理 API 显式传空字符串可清除对应密钥。
 
 Windows 使用系统 WebView2。Linux 原生窗口使用 GTK3 与 WebKitGTK 4.1，需安装 `libgtk-3-0` 和 `libwebkit2gtk-4.1-0`。命令行模式用 `messages-gateway --headless`，此时也可访问本地地址打开同一管理页面。
 
@@ -116,6 +116,8 @@ Zen 请求头按白名单重建：Messages 使用 `x-api-key`，保留 `anthropi
 CI 的 HTTP E2E 通过本机代理捕获以 `opencode.ai` 为目标的真实网关请求，验证模型列表、按前缀路由、配置密钥覆盖、无客户端密钥、头清洗、会话稳定性、三种协议的 JSON/SSE、免费层形态修正与流合并、相近域名与路径不触发伪装，并保留请求/响应及 SHA-256 清单。缓存场景验证主请求 → 独立旁路 → 主请求、共享缓存旁路的实际会话 ID，以及已知用量夹具的 JSON/SSE 口径、累计字段更新、零与未报告、响应字节与首事件及时性；cache-identities.json 和 cache-observations.json 可重复核验。GUI E2E 保存两个上游的设置、模型列表、密钥隐藏、缓存记录的深浅色/窄窗口和重启持久化证据。夹具不会证明线上命中率已经提高。
 
 `tests/history_e2e.py` 验证逐字节请求/响应、头变化与鉴权隐藏、非法 JSON、HTTP/连接错误、分片 SSE/中断、并发裁剪与重启留存；产物包含 history-backup.sqlite3、原始正文、上游捕获、详情与 SHA-256 清单。GUI 保存空白差异、完整报错和错误筛选的证据。
+
+默认路径 E2E 将二进制复制到中文/空格目录，清除路径覆盖，从其他工作目录启动并核对设置、数据库及重启留存；真实桌面 WebView 验证程序旁的 webview/，portable-paths.json 与 runtime-paths.json 保存实际路径证据。
 
 ## GitHub Actions 验证
 
