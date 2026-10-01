@@ -6,6 +6,8 @@ stale output, startup failures, and timeouts must never produce a passing gate.
 One failed suite must not skip the others; partial reports and logs must survive.
 Windows shutdown must release WebView cache files; a timeout concurrent with
 gateway startup must kill every gateway recorded by the interrupted suite.
+A child started just before the PID checkpoint must also be contained by the OS,
+otherwise its inherited log handle prevents temporary-workspace removal.
 """
 
 import csv

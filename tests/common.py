@@ -24,6 +24,52 @@ PLATFORM = "windows" if os.name == "nt" else "linux"
 SUITES = {"http": "http_e2e.py", "history": "history_e2e.py", "proxy": "proxy_e2e.py", "gui": "gui_e2e.py", "pipeline": "pipeline_e2e.py"}
 GROUPS = {"headless": ("http", "history", "proxy"), "gui": ("gui",)}
 
+_windows_job = None
+
+
+def contain_windows_children():
+    """Let Windows kill every descendant when this suite exits, even mid-spawn."""
+    global _windows_job
+    if os.name != "nt" or _windows_job is not None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
+                    ("flags", wintypes.DWORD), ("min_working_set", ctypes.c_size_t),
+                    ("max_working_set", ctypes.c_size_t), ("active_processes", wintypes.DWORD),
+                    ("affinity", ctypes.c_size_t), ("priority", wintypes.DWORD),
+                    ("scheduling", wintypes.DWORD)]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [("basic", BasicLimits), ("io", ctypes.c_uint64 * 6),
+                    ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                    ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    for name, arguments, result in [
+        ("CreateJobObjectW", [ctypes.c_void_p, wintypes.LPCWSTR], wintypes.HANDLE),
+        ("SetInformationJobObject", [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD], wintypes.BOOL),
+        ("AssignProcessToJobObject", [wintypes.HANDLE, wintypes.HANDLE], wintypes.BOOL),
+        ("GetCurrentProcess", [], wintypes.HANDLE),
+        ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
+    ]:
+        function = getattr(kernel, name)
+        function.argtypes, function.restype = arguments, result
+    job = kernel.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = ExtendedLimits()
+    limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not kernel.AssignProcessToJobObject(job, kernel.GetCurrentProcess()):
+        error = ctypes.WinError(ctypes.get_last_error())
+        kernel.CloseHandle(job)
+        raise error
+    # Keep the non-inherited handle open until process exit. Closing it here
+    # would terminate this suite as well as its descendants.
+    _windows_job = job
+
 
 def sha256(path):
     with Path(path).open("rb") as source:
@@ -144,6 +190,7 @@ class E2E:
             self.report["grok_decoder_sha256"] = sha256(checker)
 
     def __enter__(self):
+        contain_windows_children()
         write_json(self.output / "report.json", self.report)
         return self
 
