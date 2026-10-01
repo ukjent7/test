@@ -44,7 +44,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 5
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev
       - uses: Swatinem/rust-cache@v2
@@ -109,7 +109,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 5
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libgtk-3-0t64 libwebkit2gtk-4.1-0 libxdo3
           chmod +x binaries/messages-gateway binaries/grok-wire-check
