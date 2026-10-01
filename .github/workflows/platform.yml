@@ -42,7 +42,11 @@ jobs:
           python-version: '3.12'
       - name: Linux build prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev
+        timeout-minutes: 5
+        run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -103,12 +107,15 @@ jobs:
           path: binaries
       - name: Linux runtime prerequisites
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0t64 libwebkit2gtk-4.1-0 libxdo3
+          sudo apt-get install --no-install-recommends -y libgtk-3-0t64 libwebkit2gtk-4.1-0 libxdo3
           chmod +x binaries/messages-gateway binaries/grok-wire-check
       - name: Install GUI E2E driver
         if: matrix.group == 'gui'
+        timeout-minutes: 5
         run: python -m pip install -r tests/requirements.txt
       - name: Cache Linux E2E browser
         if: runner.os == 'Linux' && matrix.group == 'gui'
@@ -118,8 +125,9 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('tests/requirements.txt') }}
       - name: Prepare Linux desktop and browser
         if: runner.os == 'Linux' && matrix.group == 'gui'
+        timeout-minutes: 5
         run: |
-          sudo apt-get install -y xvfb x11-utils dbus-x11 fonts-noto-cjk
+          sudo apt-get install --no-install-recommends -y xvfb x11-utils dbus-x11 fonts-noto-cjk
           python -m playwright install --with-deps chromium
       - name: Run all suites in group
         env:

@@ -724,11 +724,12 @@ def run(binary, output, test):
         expect(wire_request.locator(".byte-diff")).to_contain_text("计算超时")
         expect(wire_request.locator(".byte-diff .removed, .byte-diff .added")).to_have_count(0)
         expect(json_diff.locator("[data-json-path]")).to_have_count(1)
+        wire_request.locator(".byte-diff").scroll_into_view_if_needed()
+        page.screenshot(path=str(output / "byte-timeout-neutral-fallback.png"))
         page.get_by_test_id("wire-original-request").locator("summary").click()
         expect(page.get_by_test_id("wire-original-request")).to_contain_text("UNCHANGED_LARGE_BODY_MARKER")
         page.get_by_role("button", name="复制差异", exact=True).click()
         assert json.loads(page.evaluate("navigator.clipboard.readText()")) == large_detail
-        page.screenshot(path=str(output / "byte-timeout-neutral-fallback.png"))
         (output / "large-json-diff.json").write_text(json.dumps(large_detail, ensure_ascii=False), encoding="utf-8")
         page.evaluate("window.ByteDiff = window.originalByteDiff; delete window.originalByteDiff")
         page.keyboard.press("Escape")
