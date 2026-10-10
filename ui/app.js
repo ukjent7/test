@@ -10,12 +10,15 @@ const activity = createActivity();
 const gateway = createGateway({getStatus: () => status, refresh});
 const refreshButton = byId('refresh-status');
 
-async function refresh() {
+async function refresh(manual = false) {
   pending?.abort();
   const controller = new AbortController();
   pending = controller;
-  refreshButton.disabled = true;
-  refreshButton.setAttribute('aria-busy', 'true');
+  // 只有手动刷新才点亮忙碌态;1 秒轮询静默进行,否则刷新图标每秒闪一次。
+  if (manual) {
+    refreshButton.disabled = true;
+    refreshButton.setAttribute('aria-busy', 'true');
+  }
   try {
     const next = await request('/ui/status', undefined, {signal: controller.signal});
     if (controller.signal.aborted) return;
@@ -38,8 +41,10 @@ async function refresh() {
   } finally {
     if (pending === controller) {
       pending = null;
-      refreshButton.disabled = false;
-      refreshButton.setAttribute('aria-busy', 'false');
+      if (manual) {
+        refreshButton.disabled = false;
+        refreshButton.setAttribute('aria-busy', 'false');
+      }
     }
   }
 }
@@ -76,7 +81,7 @@ byId('theme').addEventListener('click', () => {
   try { localStorage.setItem('theme', theme); } catch { /* The theme remains usable without storage. */ }
 });
 byId('theme').setAttribute('aria-pressed', String(document.documentElement.dataset.theme === 'dark'));
-refreshButton.addEventListener('click', refresh);
+refreshButton.addEventListener('click', () => refresh(true));
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !pending) refresh(); });
 
 async function poll() {

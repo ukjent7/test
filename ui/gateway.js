@@ -99,12 +99,22 @@ export function createGateway({getStatus, refresh}) {
   window.addEventListener('resize', () => closePicker());
   document.querySelector('main').addEventListener('scroll', () => closePicker());
 
+  let lastConfig = '';
   function connectionConfig() {
     const status = getStatus();
     if (!status) return;
     const model = selectedModel || 'stepfun/step-5-preview';
-    if (!protocolChosen) byId('client-protocol').value = model.startsWith('opencode/') ? 'chat_completions' : 'messages';
-    byId('config-example').textContent = `[model.gateway]\nmodel = ${JSON.stringify(model)}\nbase_url = ${JSON.stringify(status.endpoint)}\napi_key = ""\napi_backend = ${JSON.stringify(byId('client-protocol').value)}`;
+    const select = byId('client-protocol');
+    if (!protocolChosen) {
+      const derived = model.startsWith('opencode/') ? 'chat_completions' : 'messages';
+      // 用户正操作下拉框时不抢值。
+      if (document.activeElement !== select && select.value !== derived) select.value = derived;
+    }
+    const config = `[model.gateway]\nmodel = ${JSON.stringify(model)}\nbase_url = ${JSON.stringify(status.endpoint)}\napi_key = ""\napi_backend = ${JSON.stringify(select.value)}`;
+    if (config !== lastConfig) {
+      lastConfig = config;
+      byId('config-example').textContent = config;
+    }
   }
 
   function renderModels() {
@@ -212,15 +222,20 @@ export function createGateway({getStatus, refresh}) {
   });
 
   renderModels();
+  // 每秒轮询都会调 render:值没变的文本不重写,免得浏览器白做排版。
+  const painted = new Map();
+  function paint(id, value) {
+    if (painted.get(id) !== value) byId(id).textContent = value;
+  }
   return {
     render(status, online) {
       connected = online;
-      byId('state').textContent = online ? (status.enabled ? '运行中' : '已停止') : '连接已断开';
-      byId('state').classList.toggle('running', online && status.enabled);
-      byId('service-card').dataset.state = online ? (status.enabled ? 'running' : 'stopped') : 'offline';
-      byId('service-description').textContent = online
-        ? (status.enabled ? '新请求将按模型前缀转发至对应上游。' : '已暂停新请求，正在进行的请求继续完成。')
-        : status ? '显示上次同步的数据，恢复连接后可继续操作。' : '服务尚未连接，请确认程序状态后刷新。';
+      paint('state', online ? (status?.enabled ? '运行中' : '已停止') : '连接已断开');
+      byId('state').classList.toggle('running', online && status?.enabled);
+      byId('service-card').dataset.state = online ? (status?.enabled ? 'running' : 'stopped') : 'offline';
+      paint('service-description', online
+        ? (status?.enabled ? '新请求将按模型前缀转发至对应上游。' : '已暂停新请求，正在进行的请求继续完成。')
+        : status ? '显示上次同步的数据，恢复连接后可继续操作。' : '服务尚未连接，请确认程序状态后刷新。');
       byId('copy-endpoint').disabled = !status;
       byId('copy-config').disabled = !status;
       byId('enabled').disabled = !online || toggling;
@@ -228,19 +243,19 @@ export function createGateway({getStatus, refresh}) {
       byId('fetch-models').disabled = !online || !!modelRequest;
       if (!status) return;
       byId('enabled').setAttribute('aria-checked', String(status.enabled));
-      byId('endpoint').textContent = status.endpoint;
+      paint('endpoint', status.endpoint);
       for (const [id, value] of [['upstream', status.upstream_base_url], ['opencode-upstream', status.opencode_base_url]]) {
-        byId(id).textContent = value;
+        paint(id, value);
         byId(id).title = value;
       }
       for (const provider of ['stepfun', 'opencode']) {
-        byId(`${provider}-key-state`).textContent = status[`${provider}_key_configured`] ? '密钥已设置' : '使用客户端密钥';
-        byId(`${provider}-proxy-state`).textContent = status[`${provider}_use_proxy`] ? '跟随代理设置' : '直连';
+        paint(`${provider}-key-state`, status[`${provider}_key_configured`] ? '密钥已设置' : '使用客户端密钥');
+        paint(`${provider}-proxy-state`, status[`${provider}_use_proxy`] ? '跟随代理设置' : '直连');
       }
       const proxy = status.proxy === 'direct' ? '直连' : status.proxy ? '自定义代理' : '系统代理';
-      byId('proxy-status').textContent = `${proxy} · StepFun ${status.stepfun_use_proxy ? '跟随设置' : '直连'} · Zen ${status.opencode_use_proxy ? '跟随设置' : '直连'}`;
+      paint('proxy-status', `${proxy} · StepFun ${status.stepfun_use_proxy ? '跟随设置' : '直连'} · Zen ${status.opencode_use_proxy ? '跟随设置' : '直连'}`);
       byId('proxy-status').title = byId('proxy-status').textContent;
-      for (const field of ['requests', 'active', 'repairs', 'errors']) byId(field).textContent = status.stats[field].toLocaleString('zh-CN');
+      for (const field of ['requests', 'active', 'repairs', 'errors']) paint(field, status.stats[field].toLocaleString('zh-CN'));
       connectionConfig();
     },
   };

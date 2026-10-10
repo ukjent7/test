@@ -64,9 +64,12 @@ export function createUsage() {
     since.setHours(0, 0, 0, 0);
     since.setDate(since.getDate() - ({today: 0, '7d': 6, '30d': 29}[selectedPeriod] || 0));
     pending = true;
-    byId('usage').setAttribute('aria-busy', 'true');
-    byId('usage-loading').hidden = false;
-    showError('usage-error');
+    // 忙碌态只在强制刷新时出现;后台轮询静默,否则 loading 文案每秒闪一次。
+    if (force) {
+      byId('usage').setAttribute('aria-busy', 'true');
+      byId('usage-loading').hidden = false;
+      showError('usage-error');
+    }
     try {
       const data = await request(`/ui/usage?since=${selectedPeriod === 'all' ? 0 : since.getTime()}`);
       if (revision !== sequence || !active) return;
@@ -76,6 +79,7 @@ export function createUsage() {
         renderedKey = key;
       }
       byId('usage-updated').textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', {hour12: false})}`;
+      showError('usage-error');
     } catch (error) {
       if (revision === sequence && active) showError('usage-error', error.message);
     } finally {
