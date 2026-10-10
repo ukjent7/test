@@ -72,7 +72,7 @@
 
     <section id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
       <div class="page-heading"><div><h2>请求活动</h2><p>追踪完整交换，查看每一次兼容修补。</p></div><span class="eyebrow">最近 100 条</span></div>
-      <div class="card activity-toolbar"><div class="history-filter"><input id="call-filter" aria-label="筛选请求" placeholder="搜索请求 ID、模型或状态码" type="search"><label class="checkbox-label"><input id="errors-only" type="checkbox">仅错误</label></div><div class="filter-meta"><span id="call-count">0 / 0 条</span><button class="text-button" id="clear-filter" hidden>清除筛选</button><span class="subtle">自动同步</span></div></div>
+      <div class="card activity-toolbar"><div class="history-filter"><input id="call-filter" aria-label="筛选请求" placeholder="搜索请求 ID、模型或状态码" type="search"><label class="checkbox-label"><input id="errors-only" type="checkbox">仅错误</label><label class="checkbox-label"><input id="main-only" type="checkbox">仅主线程</label></div><div class="filter-meta"><span id="call-count">0 / 0 条</span><button class="text-button" id="clear-filter" hidden>清除筛选</button><span class="subtle">自动同步</span></div></div>
       <div class="card activity-list" data-testid="activity-list" id="activity-list"><div class="empty"><span class="empty-icon" aria-hidden="true">↔</span><strong>还没有请求</strong><p>从客户端发送一条消息，即可查看请求详情。</p></div></div>
       <p id="history-error" class="field-error" role="alert" hidden></p>
       <p class="privacy-note">最近 100 条请求及完整正文保存在本机，重启后可查。鉴权与 Cookie 仅显示指纹；未报告缓存用量不代表零命中。</p>

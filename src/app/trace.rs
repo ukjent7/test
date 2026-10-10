@@ -24,8 +24,45 @@ struct Call {
     response_changes: usize,
     routing: Option<cache::Routing>,
     cache: cache::Usage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bypass: Option<String>,
     #[serde(skip_serializing)]
     diff: Diff,
+}
+
+/// grok-build 的旁路调用在身份头里自带种类标签：conv-id 形如
+/// `<种类>-<uuid>`（memory-capture-、dream-v2- 等）；Messages 后端的
+/// side_call（回顾、标题刷新、压缩）沿用主会话 conv-id，把 `xai-<种类>-`
+/// 标签留在 req-id 里。主线程的两个头都是纯 UUID。
+fn bypass_lane(request: &history::Snapshot) -> Option<String> {
+    let bare_uuid = |value: &str| {
+        let bytes = value.as_bytes();
+        value.len() == 36
+            && bytes[8] == b'-'
+            && bytes[13] == b'-'
+            && bytes[18] == b'-'
+            && bytes[23] == b'-'
+            && value.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
+    };
+    let label = |value: &str| -> Option<String> {
+        let stem = value.strip_prefix("xai-").unwrap_or(value);
+        let tail = stem.get(stem.len().checked_sub(36)?..)?;
+        if !bare_uuid(tail) {
+            return None;
+        }
+        let kind = stem.get(..stem.len().checked_sub(37)?)?;
+        (!kind.is_empty()).then(|| kind.to_owned())
+    };
+    let header = |name: &str| {
+        request
+            .headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    };
+    header("x-grok-conv-id")
+        .and_then(label)
+        .or_else(|| header("x-grok-req-id").and_then(label))
 }
 
 #[derive(Default, Serialize)]
@@ -221,6 +258,7 @@ impl Drop for Trace {
             response_changes: self.diff.response.len(),
             routing: self.routing.take(),
             cache: std::mem::take(&mut self.cache),
+            bypass: bypass_lane(&self.exchange.request),
             diff: std::mem::take(&mut self.diff),
         };
         let summary = serde_json::to_value(&call).unwrap();

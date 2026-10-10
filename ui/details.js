@@ -1,4 +1,4 @@
-import {byId, copy, element, request} from './core.js';
+import {byId, copy, element, laneName, request} from './core.js';
 
 function diffLine(parent, kind, text, tinted = false) {
   const line = document.createElement('pre');
@@ -396,7 +396,8 @@ export function createDetails(neighbors = () => ({prev: null, next: null})) {
       detail = result;
       const around = neighbors(id);
       const at = Object.hasOwn(around, 'at') ? ` · ${around.at}/${around.total}` : '';
-      byId('diff-meta').textContent = `#${id} · ${detail.call.model} · ${detail.call.result} ${detail.call.status} · ${detail.call.duration_ms} ms${at}`;
+      const lane = detail.call.bypass ? ` · 旁路·${laneName(detail.call.bypass)}` : '';
+      byId('diff-meta').textContent = `#${id} · ${detail.call.model} · ${detail.call.result} ${detail.call.status} · ${detail.call.duration_ms} ms${at}${lane}`;
       renderDiff(content, detail.diff);
       renderExchange(content, detail.exchange);
       buildAnchors(content);

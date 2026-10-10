@@ -1,11 +1,13 @@
-import {byId, count, element} from './core.js';
+import {byId, count, element, laneName} from './core.js';
 import {createDetails} from './details.js';
 
 function callRow(call) {
   const row = byId('call-template').content.firstElementChild.cloneNode(true);
   row.dataset.callId = call.id;
-  row.querySelector('.model').textContent = call.model;
-  row.querySelector('.model').title = call.model;
+  const modelLine = row.querySelector('.model');
+  modelLine.textContent = call.model;
+  modelLine.title = call.model;
+  if (call.bypass) modelLine.append(element('span', 'lane', laneName(call.bypass)));
   row.querySelector('.time').textContent = `#${call.id} · ${new Date(call.timestamp).toLocaleString('zh-CN', {hour12: false})}`;
   row.querySelector('.outcome').textContent = `${call.result} ${call.status}`;
   row.querySelector('.outcome').dataset.result = call.result === '失败' || call.status >= 400 ? 'failed' : call.result === '取消' ? 'cancelled' : 'success';
@@ -39,10 +41,12 @@ export function createActivity() {
   function render() {
     const filter = byId('call-filter').value.trim().toLowerCase();
     const errors = byId('errors-only').checked;
-    const key = JSON.stringify([calls, filter, errors]);
+    const mainOnly = byId('main-only').checked;
+    const key = JSON.stringify([calls, filter, errors, mainOnly]);
     if (key === renderedKey) return;
     renderedKey = key;
     const selected = calls.filter(call => (!errors || call.result === '失败' || call.status >= 400)
+      && (!mainOnly || !call.bypass)
       && (!filter || [String(call.id), call.model, String(call.status), call.result].some(value => value.toLowerCase().includes(filter))));
     byId('call-count').textContent = `${selected.length} / ${calls.length} 条`;
     byId('clear-filter').hidden = !filter && !errors;
@@ -74,9 +78,11 @@ export function createActivity() {
   });
   byId('call-filter').addEventListener('input', render);
   byId('errors-only').addEventListener('change', render);
+  byId('main-only').addEventListener('change', render);
   byId('clear-filter').addEventListener('click', () => {
     byId('call-filter').value = '';
     byId('errors-only').checked = false;
+    byId('main-only').checked = false;
     render();
     byId('call-filter').focus();
   });
