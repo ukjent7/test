@@ -30,6 +30,7 @@
   --amber: #b45309; --amber-soft: #fbf0df;
   --pop-bg: rgba(255, 255, 255, .96);
   --shadow: 0 16px 44px rgba(20, 22, 30, .16), 0 2px 8px rgba(20, 22, 30, .06), 0 0 0 .5px rgba(20, 22, 30, .1);
+  --tk-s: #1a7f45; --tk-k: #7c3aed; --tk-f: #1d4ed8; --tk-n: #b45309;
   /* 找得到 Noto Sans SC 就用它,找不到回退微软雅黑 */
   --font: "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   --code: "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", ui-monospace, monospace;
@@ -63,6 +64,7 @@
   --amber: #f2b544; --amber-soft: #3f3220;
   --pop-bg: rgba(38, 38, 43, .98);
   --shadow: 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .1);
+  --tk-s: #98d8a4; --tk-k: #c4b5fd; --tk-f: #93c5fd; --tk-n: #f2b544;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -288,11 +290,16 @@ input+label { margin-top: 14px; }
 #diff-dialog>:not(#diff-content) { flex-shrink: 0; }
 
 /* ---- 差异视图 -------------------------------------------------------------- */
-.diff-legend { display: flex; flex-wrap: wrap; gap: 8px 15px; color: var(--muted); font-size: 11px; margin-bottom: 18px; }
+.diff-toolbar { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+.diff-step { display: flex; gap: 2px; flex: none; }
+.diff-nav { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.diff-anchor { padding: 2px 10px; border-radius: 999px; background: var(--pill); color: var(--ctl-fg); font-size: 11px; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--pill-line); transition: background .12s, color .12s; }
+.diff-anchor:hover { background: var(--sel); color: var(--accent); }
+.diff-legend { display: flex; flex-wrap: wrap; gap: 8px 15px; color: var(--muted); font-size: 11px; margin: 12px 0 18px; }
 #diff-content { overflow-y: auto; min-height: 0; }
-#diff-content section { min-width: 0; }
+#diff-content section { min-width: 0; scroll-margin-top: 34px; }
 #diff-content section+section { margin-top: 23px; }
-#diff-content h3 { font-size: 13px; margin-bottom: 11px; }
+#diff-content h3 { position: sticky; top: -1px; z-index: 1; font-size: 13px; margin-bottom: 11px; padding: 7px 0; background: var(--card); }
 .diff-item { border-radius: 9px; box-shadow: var(--card-edge); overflow: hidden; margin-bottom: 11px; }
 .diff-item strong, .diff-item>code, .diff-event { display: block; padding: 9px 13px 0; overflow-wrap: anywhere; }
 .diff-item>code, .diff-event { color: var(--muted); font-size: 10px; }
@@ -305,12 +312,27 @@ input+label { margin-top: 14px; }
 .diff-item .added, #diff-content>section>.added { background: var(--green-soft); }
 .diff-empty { background: var(--pill); color: var(--muted); border-radius: 8px; }
 .diff-body-summary { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
-.diff-paths { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 8px; color: var(--muted); font-size: 10px; }
+.diff-paths { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.diff-path { padding: 2px 9px; border-radius: 999px; background: var(--pill); color: var(--muted); font: 10px/1.7 var(--code); white-space: nowrap; box-shadow: inset 0 0 0 1px var(--pill-line); transition: background .12s, color .12s; }
+.diff-path:hover { background: var(--sel); color: var(--accent); }
+.diff-path.open { background: var(--sel); color: var(--accent); }
+.diff-focus { border-radius: 8px; background: var(--pill); padding: 4px 10px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.diff-focus pre { margin: 0; padding: 4px 0; }
 .diff-patch { border-radius: 8px; box-shadow: var(--card-edge); overflow: hidden; }
-#diff-content .diff-row { display: flex; gap: 12px; padding: 4px 10px; }
-.diff-number { flex: 0 0 5ch; color: var(--muted); text-align: right; user-select: none; }
-.diff-code { min-width: 0; }
+#diff-content .diff-row { display: flex; gap: 10px; padding: 1px 10px; border-radius: 3px; }
+.diff-num { flex: 0 0 4ch; color: var(--faint); font-size: 10px; line-height: inherit; text-align: right; user-select: none; -webkit-user-select: none; }
+.diff-row.removed { background: var(--red-soft); }
+.diff-row.added { background: var(--green-soft); }
+.diff-row.removed .diff-num:first-child { color: var(--red); }
+.diff-row.added .diff-num:last-child { color: var(--green); }
+.diff-code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tk-k { color: var(--tk-k); }
+.tk-s { color: var(--tk-s); }
+.tk-n { color: var(--tk-n); }
+.tk-f { color: var(--tk-f); }
 .diff-context, .diff-gap { color: var(--muted); }
+.diff-skeleton { height: 13px; border-radius: 6px; margin: 13px 0; background: linear-gradient(90deg, var(--pill) 25%, var(--pill-hover) 45%, var(--pill) 65%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
 .diff-gap { padding: 6px 10px; font-size: 10px; background: var(--pill); }
 .diff-patch .removed, .byte-diff .removed { background: var(--red-soft); }
 .diff-patch .added, .byte-diff .added { background: var(--green-soft); }

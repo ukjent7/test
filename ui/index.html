@@ -98,6 +98,13 @@
   <dialog id="diff-dialog" aria-labelledby="diff-title">
     <div class="dialog-heading"><div><h2 id="diff-title">请求 / 响应差异</h2></div><button type="button" class="icon" id="close-diff" aria-label="关闭差异">×</button></div>
     <p class="dialog-description" id="diff-meta"></p>
+    <div class="diff-toolbar">
+      <div class="diff-step">
+        <button type="button" class="icon" id="diff-prev" aria-label="上一条请求" title="上一条请求（←）" disabled>‹</button>
+        <button type="button" class="icon" id="diff-next" aria-label="下一条请求" title="下一条请求（→）" disabled>›</button>
+      </div>
+      <nav class="diff-nav" id="diff-nav" aria-label="差异区块" hidden></nav>
+    </div>
     <div class="diff-legend"><span class="removed">− 修改前</span><span class="added">+ 修改后</span><span>空格 \u0020 · Tab \t · CR \r · LF \n</span></div>
     <div id="diff-content" data-testid="diff-content" aria-busy="false"></div>
     <div class="dialog-actions"><button type="button" class="pill" id="retry-diff" hidden>重新读取</button><button type="button" class="primary" id="copy-diff" disabled>复制差异</button></div>

@@ -24,7 +24,13 @@ function callRow(call) {
 }
 
 export function createActivity() {
-  const details = createDetails();
+  // 列表按新到旧;对话框的上一条/下一条沿这个顺序走,at/total 用来显示位置。
+  const details = createDetails(id => {
+    const at = calls.findIndex(call => call.id === id);
+    return {prev: at > 0 ? calls[at - 1].id : null,
+            next: at >= 0 && at < calls.length - 1 ? calls[at + 1].id : null,
+            at: at + 1, total: calls.length};
+  });
   const list = byId('activity-list');
   const rows = new Map();
   let calls = [];
