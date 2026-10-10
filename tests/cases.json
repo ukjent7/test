@@ -118,7 +118,7 @@
   "gui": [
     "compact-shell-primary-controls-visible-without-scrolling",
     "provider-editor-scoped-and-cancel-restores-focus",
-    "model-picker-keyboard-search-preserves-selection-and-dismisses",
+    "model-cards-visible-search-preserves-selection",
     "client-model-and-protocol-preferences-survive-reload",
     "request-rows-keyboard-inspection-and-local-copy-feedback",
     "portable-default-webview-config-and-database-paths",

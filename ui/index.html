@@ -42,15 +42,20 @@
         <div class="metric"><span>失败请求</span><strong id="errors">0</strong></div>
       </div>
 
-      <div class="section-head"><h3>客户端接入</h3><button class="pill" id="fetch-models" disabled>拉取模型</button></div>
+      <div class="section-head"><h3>客户端接入</h3></div>
       <div class="card connect-card">
         <div class="connect-row"><span class="connect-label">地址</span><code data-testid="endpoint" id="endpoint">—</code><button class="pill copy-control" id="copy-endpoint" aria-label="复制地址" disabled>复制地址</button></div>
-        <div class="connect-row"><label class="connect-label" for="model-trigger">模型</label><button class="model-trigger" id="model-trigger" role="combobox" aria-label="可用模型" aria-expanded="false" aria-controls="model-list" aria-haspopup="listbox" disabled>拉取模型后选择</button><button class="pill copy-control" id="copy-model" disabled>复制模型 ID</button></div>
+        <div class="connect-row"><span class="connect-label">模型</span><code data-testid="selected-model" id="selected-model" title="">尚未选择</code><button class="pill copy-control" id="copy-model" disabled>复制模型 ID</button></div>
         <div class="connect-row"><label class="connect-label" for="client-protocol">协议</label><select id="client-protocol" aria-label="接入协议"><option value="messages">Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></div>
-        <span class="loading" id="model-loading" hidden>正在读取上游模型列表…</span><p class="field-error" id="model-error" role="alert" hidden></p>
         <details id="client-config"><summary>Grok Build 配置</summary><div class="config"><pre id="config-example"></pre><button class="pill copy-control" id="copy-config" disabled>复制配置</button></div><p class="hint">写入 config.toml 后重启客户端。协议须与所选模型匹配。</p></details>
       </div>
-      <div class="model-picker" id="model-picker" hidden><input id="model-filter" type="search" aria-label="筛选模型" placeholder="搜索模型或供应商…" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="model-list" aria-autocomplete="list"><div id="model-list" role="listbox" aria-label="模型列表"></div><div class="picker-footer"><span id="model-count">尚未拉取</span><span>↑↓ 选择 · Enter 确认</span></div></div>
+      <div class="section-head"><h3>模型</h3><span class="subtle" id="model-count">尚未拉取</span><button class="pill" id="fetch-models" disabled>拉取模型</button></div>
+      <div class="card model-card">
+        <input id="model-filter" type="search" aria-label="筛选模型" placeholder="搜索模型或供应商…" autocomplete="off" hidden>
+        <div id="model-list" role="listbox" aria-label="可用模型"></div>
+        <span class="loading" id="model-loading" hidden>正在读取上游模型列表…</span>
+        <p class="field-error" id="model-error" role="alert" hidden></p>
+      </div>
 
       <div class="section-head"><h3>上游服务</h3><span class="subtle">模型前缀决定路由</span></div>
       <div class="provider-grid">

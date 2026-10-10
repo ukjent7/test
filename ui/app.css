@@ -146,12 +146,11 @@ main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; paddi
 .connect-card { padding: 7px 14px 0; }
 .connect-row { display: flex; gap: 9px; align-items: center; min-width: 0; padding: 6px 0; }
 .connect-label { width: 42px; flex: none; color: var(--muted); font-size: 11px; margin: 0; }
-.connect-row>code, .model-trigger, .connect-row>select { flex: 1; min-width: 0; }
+.connect-row>code, .connect-row>select { flex: 1; min-width: 0; }
 .connect-row>code { overflow-wrap: anywhere; }
-.connect-row>select, .model-trigger { background: var(--pill); border: 0; border-radius: 6px; padding: 5px 9px; height: 30px; font-size: 12px; box-shadow: inset 0 0 0 1px var(--pill-line), var(--pill-shadow); transition: background .12s, box-shadow .12s; }
-.connect-row>select:hover, .model-trigger:hover:not(:disabled) { background: var(--pill-hover); }
-.model-trigger { font-family: var(--code); text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 26px; position: relative; }
-.model-trigger::after { content: '⌄'; position: absolute; right: 9px; color: var(--muted); }
+.connect-row>select { background: var(--pill); border: 0; border-radius: 6px; padding: 5px 9px; height: 30px; font-size: 12px; box-shadow: inset 0 0 0 1px var(--pill-line), var(--pill-shadow); transition: background .12s, box-shadow .12s; }
+.connect-row>select:hover { background: var(--pill-hover); }
+#selected-model { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; align-self: center; }
 .connect-row>.pill { min-width: 92px; }
 details { border-top: 1px solid var(--line-2); }
 summary { cursor: pointer; padding: 9px 0; color: var(--secondary); font-size: 11px; }
@@ -162,15 +161,15 @@ summary { cursor: pointer; padding: 9px 0; color: var(--secondary); font-size: 1
 .copy-control[data-copied="true"], button[data-copied="true"] { color: var(--green); box-shadow: inset 0 0 0 1px var(--green), var(--pill-shadow); }
 .copy-control[data-copied="true"]::before { content: '✓ '; }
 
-.model-picker { position: fixed; z-index: 10; border-radius: 10px; background: var(--pop-bg); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--shadow); padding: 7px; display: flex; flex-direction: column; }
-.model-picker input { flex: none; }
-#model-list { overflow-y: auto; min-height: 0; padding-top: 5px; }
-.model-group { color: var(--muted); font-size: 10px; padding: 8px 8px 4px; }
-#model-list [role="option"] { width: 100%; display: block; text-align: left; font: 11px/1.5 var(--code); padding: 8px; border-radius: 6px; background: transparent; overflow-wrap: anywhere; }
-#model-list [role="option"]:hover { background: var(--sel); }
-#model-list [aria-selected="true"] { color: var(--accent); }
-#model-list .highlighted { background: var(--sel); }
-.picker-footer { display: flex; justify-content: space-between; gap: 8px; padding: 8px 5px 2px; border-top: 1px solid var(--line-2); color: var(--muted); font-size: 10px; flex: none; }
+.model-card { padding: 9px 11px 11px; }
+.model-card>input { margin-bottom: 9px; }
+#model-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 7px; align-content: start; max-height: 324px; overflow-y: auto; padding: 2px; }
+.model-group { grid-column: 1 / -1; color: var(--muted); font-size: 10px; padding: 5px 2px 0; }
+#model-list [role="option"] { display: block; text-align: left; font: 11.5px/1.45 var(--code); color: var(--secondary); padding: 8px 10px; border-radius: 8px; background: var(--pill); box-shadow: inset 0 0 0 1px var(--pill-line), var(--pill-shadow); overflow-wrap: anywhere; transition: background .12s, box-shadow .12s, color .12s; }
+#model-list [role="option"]:hover { background: var(--pill-hover); }
+#model-list [aria-selected="true"] { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.model-card .empty-note { padding: 10px 2px; }
+.model-card .loading, .model-card .field-error { margin: 8px 0 0; }
 
 .provider-grid { display: flex; flex-direction: column; border-radius: 10px; background: var(--card); box-shadow: var(--card-edge); overflow: hidden; }
 .provider-card { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 3px 14px; padding: 12px 14px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }

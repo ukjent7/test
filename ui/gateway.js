@@ -9,10 +9,7 @@ export function createGateway({getStatus, refresh}) {
   let catalogLoaded = false;
   let modelRequest = null;
   let protocolChosen = false;
-  const trigger = byId('model-trigger');
-  const picker = byId('model-picker');
   const search = byId('model-filter');
-  let highlighted = -1;
   try {
     selectedModel = localStorage.getItem('gateway.model') || '';
     const protocol = localStorage.getItem('gateway.protocol');
@@ -26,78 +23,11 @@ export function createGateway({getStatus, refresh}) {
     try { localStorage.setItem(`gateway.${key}`, value); } catch { /* Keep the live selection. */ }
   }
 
-  function closePicker(restoreFocus = false) {
-    picker.hidden = true;
-    trigger.setAttribute('aria-expanded', 'false');
-    search.removeAttribute('aria-activedescendant');
-    if (restoreFocus) trigger.focus();
-  }
-
   function choose(model) {
     selectedModel = model;
     remember('model', model);
-    closePicker(true);
     renderModels();
   }
-
-  function highlight(index) {
-    const options = [...byId('model-list').querySelectorAll('[role="option"]')];
-    highlighted = options.length ? (index + options.length) % options.length : -1;
-    options.forEach((option, position) => option.classList.toggle('highlighted', position === highlighted));
-    if (highlighted < 0) search.removeAttribute('aria-activedescendant');
-    else {
-      search.setAttribute('aria-activedescendant', options[highlighted].id);
-      options[highlighted].scrollIntoView({block: 'nearest'});
-    }
-  }
-
-  function openPicker() {
-    if (trigger.disabled) return;
-    search.value = '';
-    picker.hidden = false;
-    trigger.setAttribute('aria-expanded', 'true');
-    const box = trigger.getBoundingClientRect();
-    const width = Math.min(Math.max(box.width, 340), innerWidth - 24);
-    const below = innerHeight - box.bottom - 40;
-    const above = box.top - 12;
-    const placeBelow = below >= 200 || below >= above;
-    const height = Math.min(380, placeBelow ? below : above);
-    picker.style.width = `${width}px`;
-    picker.style.maxHeight = `${height}px`;
-    picker.style.left = `${Math.max(12, Math.min(box.left, innerWidth - width - 12))}px`;
-    picker.style.top = `${placeBelow ? box.bottom + 5 : Math.max(12, box.top - height - 5)}px`;
-    renderModels();
-    search.focus();
-  }
-  trigger.addEventListener('click', () => picker.hidden ? openPicker() : closePicker());
-  trigger.addEventListener('keydown', event => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      openPicker();
-      highlight(event.key === 'ArrowDown' ? 0 : -1);
-    }
-  });
-  search.addEventListener('keydown', event => {
-    const options = [...byId('model-list').querySelectorAll('[role="option"]')];
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', 'Escape'].includes(event.key)) event.preventDefault();
-    if (event.key === 'ArrowDown') highlight(highlighted + 1);
-    if (event.key === 'ArrowUp') highlight(highlighted - 1);
-    if (event.key === 'Home') highlight(0);
-    if (event.key === 'End') highlight(options.length - 1);
-    if (event.key === 'Enter' && options[highlighted]) choose(options[highlighted].dataset.model);
-    if (event.key === 'Escape') closePicker(true);
-  });
-  picker.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.preventDefault(); closePicker(true); }
-  });
-  document.addEventListener('pointerdown', event => {
-    if (!picker.hidden && !picker.contains(event.target) && !trigger.contains(event.target)) closePicker();
-  });
-  document.addEventListener('focusin', event => {
-    if (!picker.hidden && !picker.contains(event.target) && event.target !== trigger) closePicker();
-  });
-  window.addEventListener('resize', () => closePicker());
-  document.querySelector('main').addEventListener('scroll', () => closePicker());
 
   let lastConfig = '';
   function connectionConfig() {
@@ -131,20 +61,22 @@ export function createGateway({getStatus, refresh}) {
       }
       const option = element('button', '', model.id);
       option.type = 'button';
-      option.id = `model-option-${models.indexOf(model)}`;
       option.dataset.model = model.id;
       option.setAttribute('role', 'option');
       option.setAttribute('aria-selected', String(model.id === selectedModel));
       option.addEventListener('click', () => choose(model.id));
       list.append(option);
     }
-    if (!visible.length) list.append(element('p', 'empty-note', '没有符合条件的模型'));
-    highlighted = -1;
-    search.removeAttribute('aria-activedescendant');
-    trigger.textContent = selectedModel || (catalogLoaded ? '没有可用模型' : '拉取模型后选择');
-    trigger.title = selectedModel;
-    trigger.disabled = !models.length || !!modelRequest;
+    if (!visible.length) {
+      list.append(element('p', 'empty-note', !catalogLoaded
+        ? '尚未拉取模型，点击上方「拉取模型」获取上游可用列表。'
+        : models.length ? '没有符合条件的模型。' : '上游未返回可用模型。'));
+    }
+    search.hidden = !catalogLoaded;
+    byId('selected-model').textContent = selectedModel || '尚未选择';
+    byId('selected-model').title = selectedModel;
     byId('copy-model').disabled = !models.some(model => model.id === selectedModel) || !!modelRequest;
+    byId('fetch-models').disabled = !connected || !!modelRequest;
     byId('model-count').textContent = catalogLoaded ? `${visible.length} / ${models.length} 个模型` : '尚未拉取';
     connectionConfig();
   }
@@ -152,12 +84,10 @@ export function createGateway({getStatus, refresh}) {
   function invalidateModels() {
     modelRequest?.abort();
     modelRequest = null;
-    closePicker();
     models = [];
     catalogLoaded = false;
-    byId('model-filter').value = '';
+    search.value = '';
     byId('model-loading').hidden = true;
-    byId('fetch-models').disabled = !connected;
     showError('model-error');
     renderModels();
   }
@@ -198,7 +128,6 @@ export function createGateway({getStatus, refresh}) {
       if (modelRequest === controller) {
         modelRequest = null;
         byId('model-loading').hidden = true;
-        byId('fetch-models').disabled = !connected;
         renderModels();
       }
     }

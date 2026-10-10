@@ -9,7 +9,7 @@ Frontend refactor failure scenarios, specified before implementation:
 - Raw JSON token diff must finish on reordered large bodies; budget exhaustion still shows a diff.
 - Primary connection/model/provider controls fall below the first desktop viewport.
 - Editing one provider exposes unrelated fields or Cancel loses the initiating focus.
-- Filtering silently changes the selected model; picker keyboard/dismissal is broken.
+- Filtering silently changes the selected model; the fetched catalog is hidden or fetch controls fall out of view.
 - Reload loses the chosen model/protocol; copying has no feedback at the control.
 - A request cannot be inspected by keyboard or compact rows conceal required evidence.
 - Missing module assets or script errors leave the application uninitialized.
@@ -181,7 +181,7 @@ def run(binary, output, test):
             "settings": str(settings_path), "database": str(database), "webview": str(output.resolve() / "webview")}, indent=2))
         passed("portable-default-webview-config-and-database-paths")
         passed("native-window-and-live-state")
-        for control in ["copy-endpoint", "model-trigger", "edit-upstream", "edit-opencode"]:
+        for control in ["copy-endpoint", "selected-model", "fetch-models", "edit-upstream", "edit-opencode"]:
             box = page.locator(f"#{control}").bounding_box()
             assert box and box["y"] + box["height"] < page.evaluate("innerHeight - 28")
         assert page.evaluate("document.documentElement.scrollHeight <= innerHeight")
@@ -318,15 +318,12 @@ def run(binary, output, test):
         assert json.loads(settings_path.read_text())["proxy"] == ""
         passed("proxy-defaults-provider-switches-validation-cancel-and-narrow-settings")
         page.get_by_role("button", name="拉取模型", exact=True).click()
-        expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
+        expect(page.locator('#model-list [role="option"]')).to_have_count(2)
         def choose_model(model):
-            page.locator("#model-trigger").click()
             page.get_by_role("option", name=model, exact=True).click()
 
-        page.locator("#model-trigger").click()
-        assert page.locator("#model-list [role=option]").all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
-        page.screenshot(path=str(output / "model-picker-open.png"))
-        page.keyboard.press("Escape")
+        assert page.locator('#model-list [role="option"]').all_text_contents() == ["stepfun/step-5-preview", "opencode/mimo-v2.5-free"]
+        page.screenshot(path=str(output / "model-cards.png"))
         assert {call["authorization"] for call in model_calls} == {"Bearer GUI_STEP_KEY", "Bearer GUI_ZEN_KEY"}
         choose_model("opencode/mimo-v2.5-free")
         page.get_by_role("button", name="复制模型 ID", exact=True).click()
@@ -337,35 +334,35 @@ def run(binary, output, test):
         assert "GUI_STEP_KEY" not in json.dumps(state) and "GUI_ZEN_KEY" not in json.dumps(state)
         (output / "models.json").write_text(json.dumps(context.request.get(address + "/v1/models").json(), indent=2))
         passed("configured-keys-private-model-fetch-and-copy")
-        page.locator("#model-trigger").click()
         page.get_by_label("筛选模型", exact=True).fill("STEPFUN")
-        expect(page.get_by_label("可用模型", exact=True)).to_have_text("opencode/mimo-v2.5-free")
         expect(page.locator('#model-list [role="option"]')).to_have_count(1)
+        expect(page.get_by_test_id("selected-model")).to_have_text("opencode/mimo-v2.5-free")
         page.get_by_label("筛选模型", exact=True).fill("no-model-matches")
         expect(page.locator('#model-list [role="option"]')).to_have_count(0)
         expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
         page.get_by_label("筛选模型", exact=True).fill("")
-        page.keyboard.press("ArrowDown")
+        page.get_by_role("option", name="stepfun/step-5-preview", exact=True).focus()
         page.keyboard.press("Enter")
-        expect(page.locator("#model-picker")).not_to_be_visible()
-        expect(page.locator("#model-trigger")).to_be_focused()
+        expect(page.get_by_test_id("selected-model")).to_have_text("stepfun/step-5-preview")
         choose_model("opencode/mimo-v2.5-free")
-        passed("model-picker-keyboard-search-preserves-selection-and-dismisses")
+        passed("model-cards-visible-search-preserves-selection")
         page.route("**/v1/models", lambda route: route.fulfill(status=502, content_type="application/json",
                    body=json.dumps({"error": {"message": "MODEL_REFRESH_FAILURE"}})))
         page.get_by_role("button", name="拉取模型", exact=True).click()
         expect(page.locator("#model-error")).to_contain_text("MODEL_REFRESH_FAILURE")
-        expect(page.get_by_label("可用模型", exact=True)).to_have_text("opencode/mimo-v2.5-free")
+        expect(page.locator('#model-list [role="option"]')).to_have_count(2)
+        expect(page.get_by_test_id("selected-model")).to_have_text("opencode/mimo-v2.5-free")
         expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_enabled()
         page.unroute("**/v1/models")
         page.route("**/v1/models", lambda route: route.fulfill(content_type="application/json",
                    body=json.dumps({"data": [], "upstream_errors": []})))
         page.get_by_role("button", name="拉取模型", exact=True).click()
-        expect(page.get_by_label("可用模型", exact=True)).to_be_disabled()
+        expect(page.locator('#model-list [role="option"]')).to_have_count(0)
+        expect(page.locator("#model-list")).to_contain_text("上游未返回可用模型")
         expect(page.get_by_role("button", name="复制模型 ID", exact=True)).to_be_disabled()
         page.unroute("**/v1/models")
         page.get_by_role("button", name="拉取模型", exact=True).click()
-        expect(page.get_by_label("可用模型", exact=True)).to_be_enabled()
+        expect(page.locator('#model-list [role="option"]')).to_have_count(2)
         choose_model("opencode/mimo-v2.5-free")
         page.get_by_label("接入协议", exact=True).select_option("responses")
         page.locator("#client-config").evaluate("element => element.open = true")
