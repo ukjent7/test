@@ -119,16 +119,27 @@ async fn forward(
     url.set_query(uri.query());
     let client_streaming = request["stream"].as_bool().unwrap_or(false);
     let mut collapse = false;
+    // Zen 免费模型在发送前就按免费层形态整形；未知免费模型仍由 403 兜底补齐一次。
+    let zen_free = zen::is_zen(&url) && zen::is_free_model(&wire_model);
+    let mut zen_tools = None;
+    if zen_free {
+        let (changes, tools) = zen::prepare_free_body(&mut request, &endpoint);
+        trace.diff.request.extend(changes);
+        zen_tools = Some(tools);
+        collapse = !client_streaming;
+    }
     let mut upstream = send_upstream(&client, &url, &headers, &request, trace).await?;
-    if !anthropic && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
+    if !zen_free && zen::is_zen(&url) && upstream.status() == StatusCode::FORBIDDEN {
         trace.status = 403;
         let mut original_headers = upstream.headers().clone();
         strip_hop_headers(&mut original_headers);
         let bytes = read_upstream(upstream, trace).await?;
         let free_error = serde_json::from_slice::<Value>(&bytes)
             .is_ok_and(|error| error["error"]["type"] == "FreeTierError");
-        if free_error && let Some(change) = zen::prepare_free_body(&mut request, &endpoint) {
-            trace.diff.request.push(change);
+        let (changes, tools) = zen::prepare_free_body(&mut request, &endpoint);
+        if free_error && !changes.is_empty() {
+            trace.diff.request.extend(changes);
+            zen_tools = Some(tools);
             collapse = !client_streaming;
             upstream = send_upstream(&client, &url, &headers, &request, trace).await?;
         } else {
@@ -145,8 +156,19 @@ async fn forward(
         .is_some_and(|value| value.split(';').next().unwrap_or("").trim() == "text/event-stream");
     if collapse && status.is_success() && is_sse {
         let bytes = read_upstream(upstream, trace).await?;
-        let value = zen::collapse(&bytes, &endpoint)?;
+        let tools = zen_tools.take().unwrap_or_default();
+        let mut value = if anthropic {
+            zen::collapse_messages(&bytes)?
+        } else {
+            zen::collapse(&bytes, &endpoint)?
+        };
+        let mut changes = tools.fix_response(&mut value, &endpoint);
+        if anthropic {
+            changes.extend(normalize_response(&mut value));
+        }
         trace.cache.observe(&endpoint, &value);
+        trace.repairs += changes.len();
+        trace.diff.response.extend(changes);
         headers.remove(header::CONTENT_LENGTH);
         headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
         trace.result = "完成";
@@ -197,6 +219,7 @@ async fn forward(
             false,
         ));
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
+        let mut zen_fix = zen_tools.take().map(zen::StreamFix::new);
         let stream = async_stream::stream! {
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
@@ -224,21 +247,38 @@ async fn forward(
                     }
                     if blank {
                         frame_number += 1;
-                        let (output, changes) = normalize_sse(&frame, frame_number, &endpoint, &mut trace.cache);
+                        let (output, changes) = normalize_sse(
+                            &frame,
+                            frame_number,
+                            &endpoint,
+                            &mut trace.cache,
+                            zen_fix.as_mut(),
+                        );
                         trace.repairs += changes.len();
                         trace.diff.response.extend(changes);
-                        trace.exchange.response.as_mut().unwrap().body.extend_from_slice(&output);
-                        yield Ok(Bytes::from(output));
+                        if !output.is_empty() {
+                            let exchange = trace.exchange.response.as_mut().unwrap();
+                            exchange.body.extend_from_slice(&output);
+                            yield Ok(Bytes::from(output));
+                        }
                         frame.clear();
                     }
                 }
             }
             if !frame.is_empty() {
-                let (output, changes) = normalize_sse(&frame, frame_number + 1, &endpoint, &mut trace.cache);
+                let (output, changes) = normalize_sse(
+                    &frame,
+                    frame_number + 1,
+                    &endpoint,
+                    &mut trace.cache,
+                    zen_fix.as_mut(),
+                );
                 trace.repairs += changes.len();
                 trace.diff.response.extend(changes);
-                trace.exchange.response.as_mut().unwrap().body.extend_from_slice(&output);
-                yield Ok(Bytes::from(output));
+                if !output.is_empty() {
+                    trace.exchange.response.as_mut().unwrap().body.extend_from_slice(&output);
+                    yield Ok(Bytes::from(output));
+                }
             }
             trace.result = "完成";
             trace.upstream_response().complete = true;
@@ -250,12 +290,17 @@ async fn forward(
         match serde_json::from_slice::<Value>(&bytes) {
             Ok(mut value) => {
                 trace.cache.observe(&endpoint, &value);
+                let mut changes = match &zen_tools {
+                    Some(tools) => tools.fix_response(&mut value, &endpoint),
+                    None => Vec::new(),
+                };
                 if anthropic {
-                    trace.diff.response = normalize_response(&mut value);
-                    trace.repairs = trace.diff.response.len();
-                    if trace.repairs > 0 {
-                        bytes = Bytes::from(serde_json::to_vec(&value).unwrap());
-                    }
+                    changes.extend(normalize_response(&mut value));
+                }
+                trace.diff.response = changes;
+                trace.repairs = trace.diff.response.len();
+                if trace.repairs > 0 {
+                    bytes = Bytes::from(serde_json::to_vec(&value).unwrap());
                 }
             }
             Err(error) if anthropic => {

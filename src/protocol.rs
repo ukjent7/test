@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::{app::Change, cache};
+use crate::{app::Change, cache, zen};
 
 fn unsigned_thinking(block: &Value) -> bool {
     block["type"] == "thinking"
@@ -138,6 +138,7 @@ pub(crate) fn normalize_sse(
     frame_number: usize,
     endpoint: &str,
     usage: &mut cache::Usage,
+    mut zen: Option<&mut zen::StreamFix>,
 ) -> (Vec<u8>, Vec<Change>) {
     let Ok(text) = std::str::from_utf8(frame) else {
         return (frame.to_vec(), Vec::new());
@@ -154,23 +155,24 @@ pub(crate) fn normalize_sse(
         return (frame.to_vec(), Vec::new());
     };
     usage.observe(endpoint, &value);
-    if endpoint != "messages" {
+    let mut changes = Vec::new();
+    let mut keep = true;
+    if let Some(fix) = zen.as_deref_mut() {
+        let (kept, zen_changes) = fix.frame(&mut value, endpoint);
+        changes.extend(zen_changes);
+        keep = kept;
+    }
+    if keep && endpoint == "messages" {
+        changes.extend(normalize_response(&mut value));
+    }
+    if !keep {
+        label_changes(&mut changes, frame_number, &value);
+        return (Vec::new(), changes);
+    }
+    if changes.is_empty() {
         return (frame.to_vec(), Vec::new());
     }
-    let mut changes = normalize_response(&mut value);
-    if changes.is_empty() {
-        return (frame.to_vec(), changes);
-    }
-    let mut event = format!(
-        "SSE #{frame_number} · {}",
-        value["type"].as_str().unwrap_or("")
-    );
-    if let Some(index) = value["index"].as_u64() {
-        event.push_str(&format!(" · index {index}"));
-    }
-    for change in &mut changes {
-        change.event = Some(event.clone());
-    }
+    label_changes(&mut changes, frame_number, &value);
     let mut output = String::new();
     let mut replaced = false;
     for line in text.split_inclusive('\n') {
@@ -190,4 +192,17 @@ pub(crate) fn normalize_sse(
         }
     }
     (output.into_bytes(), changes)
+}
+
+fn label_changes(changes: &mut [Change], frame_number: usize, value: &Value) {
+    let mut event = format!(
+        "SSE #{frame_number} · {}",
+        value["type"].as_str().unwrap_or("")
+    );
+    if let Some(index) = value["index"].as_u64() {
+        event.push_str(&format!(" · index {index}"));
+    }
+    for change in changes {
+        change.event = Some(event.clone());
+    }
 }

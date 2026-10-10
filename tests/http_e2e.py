@@ -15,6 +15,18 @@ from wire_fixtures import MISSING, MESSAGE, START, END, NATIVE_SSE, ZEN_WIRE, CA
 
 from common import free_port, suite_cli, wait_ready
 
+ZEN_MESSAGES_EVENTS = [
+    {"type": "message_start", "message": {"id": "msg_free", "type": "message", "role": "assistant",
+        "model": "mimo-v2.5-free", "content": [], "stop_reason": None, "stop_sequence": None,
+        "usage": {"input_tokens": 9, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "免费回复"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+     "usage": {"output_tokens": 7}},
+    {"type": "message_stop"},
+]
+
 
 def run(binary, checker, output, test):
     report = test.report
@@ -85,57 +97,83 @@ def run(binary, checker, output, test):
                     self.wfile.write(wire[offset:offset + 7])
                     self.wfile.flush()
                 return
-            if self.path.split("?", 1)[0].endswith(("/chat/completions", "/responses")):
-                request = json.loads(body)
-                if case == "mimo-v2.5-free" or case.startswith("zen-free-"):
-                    names = {tool.get("function", tool).get("name") for tool in request.get("tools", [])}
-                    if not request.get("stream") or not set(("bash", "edit", "glob", "grep", "read")) <= names or case == "zen-free-always-denied":
-                        wire = b'{"type":"error","error":{"type":"FreeTierError","message":"fixture"}}'
-                        self.send_response(403)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(wire)))
-                        self.end_headers()
-                        self.wfile.write(wire)
-                        return
-                    wire = ZEN_WIRE
-                    if case == "zen-free-tools":
-                        chunks = [{"id": "tools-e2e", "object": "chat.completion.chunk", "model": case,
-                                   "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "reason ",
-                                       "tool_calls": [{"index": 0, "id": "tool_1", "type": "function",
-                                           "function": {"name": "read_file", "arguments": '{"path":'}}]}}]},
-                                  {"choices": [{"index": 0, "delta": {"reasoning_content": "done",
-                                       "tool_calls": [{"index": 0, "function": {"arguments": '"README.md"}'}}]},
-                                       "finish_reason": "tool_calls"},
-                                       {"index": 1, "delta": {"content": "second choice"}, "finish_reason": "stop"}],
-                                   "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}]
-                        wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
-                    elif case == "zen-free-responses":
-                        completed = {"type": "response.completed", "response": {"id": "resp_free", "object": "response",
-                            "status": "completed", "model": case, "output": [{"type": "message", "content": [
-                                {"type": "output_text", "text": "hello"}]}], "usage": {"input_tokens": 5, "output_tokens": 2}}}
-                        wire = b"data: " + json.dumps(completed).encode() + b"\n\n"
-                    elif case == "zen-free-invalid":
-                        wire = b"data: invalid\n\ndata: [DONE]\n\n"
-                    elif case == "zen-free-missing-done":
-                        wire = ZEN_WIRE.replace(b"data: [DONE]\r\n\r\n", b"").replace(b"data: [DONE]\n\n", b"")
+            request = json.loads(body)
+            if case in ("mimo-v2.5-free", "mimo-v2.5-free-messages") or case.startswith("zen-free-"):
+                names = {tool.get("function", tool).get("name") for tool in request.get("tools", [])}
+                if not request.get("stream") or not set(("bash", "read")) <= names or case == "zen-free-always-denied":
+                    wire = b'{"type":"error","error":{"type":"FreeTierError","message":"fixture"}}'
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(wire)))
+                    self.end_headers()
+                    self.wfile.write(wire)
+                    return
+                if case == "mimo-v2.5-free-messages":
+                    wire = b"".join(b"data: " + json.dumps(event).encode() + b"\r\n\r\n"
+                                    for event in ZEN_MESSAGES_EVENTS)
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
-                    if case == "zen-free-live":
-                        first = b": upstream heartbeat\n\n"
-                        self.send_header("Content-Length", str(len(first) + len(wire)))
-                        self.end_headers()
-                        self.wfile.write(first)
-                        self.wfile.flush()
-                        assert release.wait(10)
-                    else:
-                        self.send_header("Content-Length", str(len(wire) + (4096 if case == "zen-free-truncated" else 0)))
-                        self.end_headers()
+                    self.send_header("Content-Length", str(len(wire)))
+                    self.end_headers()
                     self.wfile.write(wire)
-                    self.wfile.flush()
-                    if case == "zen-free-truncated":
-                        self.close_connection = True
                     return
-                payload = {"id": "native-e2e", "model": json.loads(body)["model"],
+                wire = ZEN_WIRE
+                if case == "zen-free-tools":
+                    chunks = [{"id": "tools-e2e", "object": "chat.completion.chunk", "model": case,
+                               "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "reason ",
+                                   "tool_calls": [{"index": 0, "id": "tool_1", "type": "function",
+                                       "function": {"name": "read_file", "arguments": '{"path":'}}]}}]},
+                              {"choices": [{"index": 0, "delta": {"reasoning_content": "done",
+                                   "tool_calls": [{"index": 0, "function": {"arguments": '"README.md"}'}}]},
+                                   "finish_reason": "tool_calls"},
+                                   {"index": 1, "delta": {"content": "second choice"}, "finish_reason": "stop"}],
+                               "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+                elif case == "zen-free-responses":
+                    completed = {"type": "response.completed", "response": {"id": "resp_free", "object": "response",
+                        "status": "completed", "model": case, "output": [{"type": "message", "content": [
+                            {"type": "output_text", "text": "hello"}]}], "usage": {"input_tokens": 5, "output_tokens": 2}}}
+                    wire = b"data: " + json.dumps(completed).encode() + b"\n\n"
+                elif case == "zen-free-stub":
+                    chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]},
+                              {"choices": [{"index": 0, "delta": {"tool_calls": [
+                                  {"index": 0, "id": "call_stub", "type": "function",
+                                   "function": {"name": "bash", "arguments": '{"command":'}}]}}]},
+                              {"choices": [{"index": 0, "delta": {"tool_calls": [
+                                  {"index": 0, "function": {"arguments": '"ls"}'}}]}}]},
+                              {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+                elif case == "zen-free-rename":
+                    chunks = [{"choices": [{"index": 0, "delta": {"tool_calls": [
+                                  {"index": 0, "id": "call_1", "type": "function",
+                                   "function": {"name": "bash", "arguments": '{"command":'}}]}}]},
+                              {"choices": [{"index": 0, "delta": {"tool_calls": [
+                                  {"index": 0, "function": {"arguments": '"ls"}'}}]}}]},
+                              {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+                elif case == "zen-free-invalid":
+                    wire = b"data: invalid\n\ndata: [DONE]\n\n"
+                elif case == "zen-free-missing-done":
+                    wire = ZEN_WIRE.replace(b"data: [DONE]\r\n\r\n", b"").replace(b"data: [DONE]\n\n", b"")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                if case == "zen-free-live":
+                    first = b": upstream heartbeat\n\n"
+                    self.send_header("Content-Length", str(len(first) + len(wire)))
+                    self.end_headers()
+                    self.wfile.write(first)
+                    self.wfile.flush()
+                    assert release.wait(10)
+                else:
+                    self.send_header("Content-Length", str(len(wire) + (4096 if case == "zen-free-truncated" else 0)))
+                    self.end_headers()
+                self.wfile.write(wire)
+                self.wfile.flush()
+                if case == "zen-free-truncated":
+                    self.close_connection = True
+                return
+            if self.path.split("?", 1)[0].endswith(("/chat/completions", "/responses")):
+                payload = {"id": "native-e2e", "model": request["model"],
                            "content": [{"type": "thinking", "thinking": "native passthrough"}],
                            "choices": [{"message": {"role": "assistant", "content": "hello"}}]}
                 streaming = json.loads(body).get("stream", False)
@@ -405,14 +443,19 @@ def run(binary, checker, output, test):
             assert capture["body"] == payload, capture
             assert capture["path"] == "http://opencode.ai/zen/v1/messages?beta=true"
             forwarded = {k.lower(): v for k, v in capture["headers"].items()}
-            assert forwarded["user-agent"] == "opencode/1.18.31"
+            assert forwarded["user-agent"] == "opencode/1.18.34"
             assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-session"])
+            assert re.fullmatch(r"msg_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-request"])
+            assert forwarded["x-opencode-client"] == "cli"
+            assert forwarded["x-opencode-project"] == "global"
             assert forwarded["x-api-key"] == "dummy-token"
             assert forwarded["anthropic-version"] == "2023-06-01"
             assert forwarded["anthropic-beta"] == "test-beta"
             assert set(forwarded) <= {"host", "content-length", "content-type", "accept",
                                       "accept-encoding", "user-agent", "x-opencode-session",
-                                      "x-api-key", "anthropic-version", "anthropic-beta"}, forwarded
+                                      "x-opencode-request", "x-opencode-client",
+                                      "x-opencode-project", "x-api-key",
+                                      "anthropic-version", "anthropic-beta"}, forwarded
             passed(case)
             return forwarded["x-opencode-session"], wire
 
@@ -662,24 +705,44 @@ def run(binary, checker, output, test):
         assert reasoning == message["choices"][0]["message"]["reasoning_details"][0]["text"]
         assert message["choices"][0]["message"]["reasoning_details"][0]["format"] == "unknown"
         assert message["usage"]["total_tokens"] == 244 and message["cost"] == "0"
-        assert len(seen) == 2 and seen[0]["body"]["stream"] is False
-        assert seen[1]["body"]["stream"] is True and seen[1]["body"]["tool_choice"] == "none"
-        assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"bash", "edit", "glob", "grep", "read"}
-        assert seen[0]["headers"]["x-opencode-session"] == seen[1]["headers"]["x-opencode-session"]
+        assert len(seen) == 1 and seen[0]["body"]["stream"] is True
+        assert "tool_choice" not in seen[0]["body"]
+        assert {tool["function"]["name"] for tool in seen[0]["body"]["tools"]} == {"bash", "read"}
         _, state = get("/ui/status")
         _, detail = get(f"/ui/calls/{state['calls'][0]['id']}")
         assert any(change["reason"] == "Zen 免费层要求流式与基础工具" for change in detail["diff"]["request"])
         assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail["diff"])
         exchange = detail["exchange"]
-        assert len(exchange["attempts"]) == 2
-        assert exchange["attempts"][0]["response"]["status"] == 403
-        assert exchange["attempts"][1]["response"]["status"] == 200
-        assert bytes(exchange["attempts"][1]["response"]["body"]) == ZEN_WIRE
+        assert len(exchange["attempts"]) == 1
+        assert exchange["attempts"][0]["response"]["status"] == 200
+        assert bytes(exchange["attempts"][0]["response"]["body"]) == ZEN_WIRE
         assert bytes(exchange["response"]["body"]) == wire
         assert "PRIVATE_FREE_MESSAGE" in bytes(exchange["request"]["body"]).decode()
         assert detail["call"]["cache"] == {"input_tokens": 225, "output_tokens": 19, "cache_read_tokens": 0, "cache_write_tokens": 0}
         (output / "free-request-diff.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("free-json-collapses-real-mimo-stream")
+
+        payload = {"model": "opencode/mimo-v2.5-free", "max_tokens": 64, "stream": False,
+                   "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+                   "messages": [{"role": "assistant", "content": [
+                           {"type": "tool_use", "id": "tool_1", "name": "Bash", "input": {}}]},
+                       {"role": "user", "content": "PRIVATE_FREE_MESSAGE"}]}
+        before = len(attempts.get("mimo-v2.5-free-messages", []))
+        status, headers, wire = post("mimo-v2.5-free-messages", payload)
+        assert status == 200 and headers["content-type"].startswith("application/json")
+        message = json.loads(wire)
+        assert message["type"] == "message" and message["role"] == "assistant"
+        assert message["content"] == [{"type": "text", "text": "免费回复"}]
+        assert message["stop_reason"] == "end_turn"
+        assert message["usage"]["input_tokens"] == 9 and message["usage"]["output_tokens"] == 7
+        seen = attempts["mimo-v2.5-free-messages"][before:]
+        assert len(seen) == 1
+        tools = seen[0]["body"]["tools"]
+        assert tools[0] == {"name": "bash", "input_schema": {"type": "object"}}
+        assert tools[1]["name"] == "read" and tools[1]["input_schema"]["type"] == "object"
+        assert seen[0]["body"]["messages"][0]["content"][0]["name"] == "bash"
+        (output / "free-messages-collapse.json").write_text(wire.decode(), encoding="utf-8")
+        passed("free-messages-collapse-anthropic-wire")
 
         tool = {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
         choice = {"type": "function", "function": {"name": "read_file"}}
@@ -698,6 +761,26 @@ def run(binary, checker, output, test):
         assert status == 200 and json.loads(wire)["output"][0]["content"][0]["text"] == "hello"
         assert json.loads(wire)["usage"]["input_tokens"] == 5
         passed("free-responses-terminal-json")
+        status, _, wire, seen = free_post("zen-free-stub", streaming=True)
+        assert status == 200
+        events = decode_sse(wire)
+        assert len(events) == 2 and "bash" not in json.dumps(events)
+        assert events[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+        assert events[1]["choices"][0]["finish_reason"] == "stop"
+        assert len(seen) == 2
+        assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"bash", "read"}
+        passed("free-stub-call-dropped-and-stop-reclassified")
+        status, _, wire, seen = free_post("zen-free-rename", streaming=True,
+                                          tools=[{"type": "function", "function": {"name": "Bash"}}])
+        assert status == 200
+        events = decode_sse(wire)
+        call = events[0]["choices"][0]["delta"]["tool_calls"][0]
+        assert call["function"] == {"name": "Bash", "arguments": '{"command":"ls"}'}
+        assert events[1]["choices"][0]["finish_reason"] == "tool_calls"
+        assert len(seen) == 2
+        tools = seen[1]["body"]["tools"]
+        assert tools[0]["function"]["name"] == "bash" and tools[1]["function"]["name"] == "read"
+        passed("free-tool-renamed-roundtrip")
         release.clear()
         status, headers, wire, _ = free_post("zen-free-live", streaming=True)
         assert status == 200 and headers["content-type"].startswith("text/event-stream")
