@@ -59,12 +59,29 @@ export function createGateway({getStatus, refresh}) {
         list.append(element('div', 'model-group', providerName(provider)));
         group = provider;
       }
-      const option = element('button', '', model.id);
-      option.type = 'button';
-      option.dataset.model = model.id;
+      const option = element('div', 'model-item');
       option.setAttribute('role', 'option');
+      option.setAttribute('aria-label', model.id);
       option.setAttribute('aria-selected', String(model.id === selectedModel));
+      option.tabIndex = 0;
+      option.dataset.model = model.id;
+      option.append(element('span', 'model-name', model.id));
+      const copyButton = element('button', 'model-copy');
+      copyButton.type = 'button';
+      copyButton.setAttribute('aria-label', `复制 ${model.id}`);
+      copyButton.title = '复制模型 ID';
+      copyButton.addEventListener('click', event => {
+        event.stopPropagation();
+        copy(model.id, event.currentTarget);
+      });
+      option.append(copyButton);
       option.addEventListener('click', () => choose(model.id));
+      option.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          choose(model.id);
+        }
+      });
       list.append(option);
     }
     if (!visible.length) {

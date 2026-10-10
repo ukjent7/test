@@ -16,6 +16,7 @@ Frontend refactor failure scenarios, specified before implementation:
 - Tabs cannot be reached by keyboard, or focus and selected panel disagree.
 - Closing settings retains secret drafts; repeated saves or Escape interrupt a save.
 - Model refresh failures erase the catalog; empty/filter results leave copy enabled.
+- Copying one model's ID from its card silently switches the selection or is unavailable.
 - Generated client configuration ignores the selected model or protocol.
 - A disconnected status leaves write controls enabled or cannot recover on refresh.
 - An older usage response overwrites a newly selected period.
@@ -333,6 +334,9 @@ def run(binary, output, test):
         state = context.request.get(address + "/ui/status").json()
         assert "GUI_STEP_KEY" not in json.dumps(state) and "GUI_ZEN_KEY" not in json.dumps(state)
         (output / "models.json").write_text(json.dumps(context.request.get(address + "/v1/models").json(), indent=2))
+        page.get_by_role("button", name="复制 stepfun/step-5-preview", exact=True).click()
+        assert page.evaluate("navigator.clipboard.readText()") == "stepfun/step-5-preview"
+        expect(page.get_by_test_id("selected-model")).to_have_text("opencode/mimo-v2.5-free")
         passed("configured-keys-private-model-fetch-and-copy")
         page.get_by_label("筛选模型", exact=True).fill("STEPFUN")
         expect(page.locator('#model-list [role="option"]')).to_have_count(1)
