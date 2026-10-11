@@ -302,6 +302,7 @@ impl StreamFix {
 
     fn chat_frame(&mut self, value: &mut Value) -> (bool, Vec<Change>) {
         let mut changes = Vec::new();
+        let with_usage = value.get("usage").is_some();
         let Some(choices) = value["choices"].as_array_mut() else {
             return (true, changes);
         };
@@ -373,7 +374,7 @@ impl StreamFix {
         }
         // 桩调用被剔除后可能整个帧只剩空壳；usage 单独成帧时不能丢。
         let emptied = !choices.is_empty()
-            && value.get("usage").is_none()
+            && !with_usage
             && choices.iter().all(|choice| {
                 choice["delta"] == json!({}) && choice["finish_reason"].is_null()
             });
