@@ -375,9 +375,9 @@ impl StreamFix {
         // 桩调用被剔除后可能整个帧只剩空壳；usage 单独成帧时不能丢。
         let emptied = !choices.is_empty()
             && !with_usage
-            && choices.iter().all(|choice| {
-                choice["delta"] == json!({}) && choice["finish_reason"].is_null()
-            });
+            && choices
+                .iter()
+                .all(|choice| choice["delta"] == json!({}) && choice["finish_reason"].is_null());
         (!emptied, changes)
     }
 

@@ -86,7 +86,7 @@ def decode_sse(wire):
     for block in wire.decode().replace("\r\n", "\n").split("\n\n"):
         data = "\n".join(line[5:].removeprefix(" ") for line in block.splitlines()
                          if line.startswith("data:"))
-        if data:
+        if data and data != "[DONE]":
             values.append(json.loads(data))
     return values
 
