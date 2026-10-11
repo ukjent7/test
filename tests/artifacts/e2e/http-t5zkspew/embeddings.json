@@ -1,0 +1,19 @@
+{
+  "request": {
+    "model": "step-5-preview",
+    "max_tokens": 512,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好"
+      }
+    ]
+  },
+  "response_status": 404,
+  "response_headers": {
+    "content-length": "0",
+    "date": "Sun, 11 Oct 2026 05:14:22 GMT"
+  },
+  "upstream": null
+}

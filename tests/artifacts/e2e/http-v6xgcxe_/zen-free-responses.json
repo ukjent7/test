@@ -1,0 +1,57 @@
+{
+  "request": {
+    "model": "opencode/zen-free-responses",
+    "max_tokens": 64,
+    "stream": false,
+    "input": "PRIVATE_FREE_MESSAGE"
+  },
+  "response_status": 200,
+  "response_headers": {
+    "content-type": "application/json",
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:19 GMT",
+    "content-length": "213"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/responses",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_ab421e604b4d00005sMeqiGgCR",
+      "x-opencode-request": "msg_71c828970fc400040q8YvcQGWG",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "401"
+    },
+    "body": {
+      "input": "PRIVATE_FREE_MESSAGE",
+      "max_tokens": 64,
+      "model": "zen-free-responses",
+      "stream": true,
+      "tools": [
+        {
+          "description": "Not available in this session. Never call this tool.",
+          "name": "bash",
+          "parameters": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "function"
+        },
+        {
+          "description": "Not available in this session. Never call this tool.",
+          "name": "read",
+          "parameters": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "function"
+        }
+      ]
+    }
+  }
+}

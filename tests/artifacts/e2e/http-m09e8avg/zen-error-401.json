@@ -1,0 +1,52 @@
+{
+  "request": {
+    "model": "zen-error-401",
+    "max_tokens": 64,
+    "stream": false,
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response_status": 401,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:32 GMT",
+    "content-type": "application/json",
+    "retry-after": "7",
+    "location": "/must-not-follow",
+    "content-length": "65",
+    "x-request-id": "req-e2e"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/messages?beta=true",
+    "headers": {
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "test-beta",
+      "x-api-key": "dummy-token",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_6102193bcb8b000LVLrRs4nlFR",
+      "x-opencode-request": "msg_22e4cf84264b0000ksj1gXhlsn",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "103"
+    },
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "hello",
+          "role": "user"
+        }
+      ],
+      "model": "zen-error-401",
+      "stream": false
+    }
+  }
+}

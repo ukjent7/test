@@ -1,0 +1,35 @@
+{
+  "request": {
+    "model": "opencode/responses-model",
+    "stream": true,
+    "input": "hello"
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:34 GMT",
+    "content-type": "text/event-stream",
+    "transfer-encoding": "chunked"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/responses?beta=true",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_7184bc5368fc0007SH9ykKYdeZ",
+      "x-opencode-request": "msg_35fa1eb1304a000Dapq0YhSorr",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "57"
+    },
+    "body": {
+      "input": "hello",
+      "model": "responses-model",
+      "stream": true
+    }
+  }
+}

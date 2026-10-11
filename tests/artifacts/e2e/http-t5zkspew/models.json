@@ -1,0 +1,46 @@
+{
+  "catalog": {
+    "data": [
+      {
+        "created": 7,
+        "id": "stepfun/step-5-preview",
+        "object": "model",
+        "owned_by": "stepfun"
+      },
+      {
+        "created": 7,
+        "id": "opencode/mimo-v2.5-free",
+        "object": "model",
+        "owned_by": "opencode"
+      }
+    ],
+    "object": "list",
+    "upstream_errors": []
+  },
+  "upstreams": {
+    "models-opencode": {
+      "path": "http://opencode.ai/zen/v1/models",
+      "headers": {
+        "authorization": "Bearer configured-zen-key",
+        "content-type": "application/json",
+        "accept": "application/json, text/event-stream",
+        "user-agent": "opencode/1.18.34",
+        "x-opencode-session": "ses_ce527fcde866000KDKkjaQ7X6k",
+        "x-opencode-request": "msg_1e1d910b3467000GfKGuajI0aA",
+        "x-opencode-client": "cli",
+        "x-opencode-project": "global",
+        "accept-encoding": "identity",
+        "host": "opencode.ai"
+      }
+    },
+    "models-stepfun": {
+      "path": "/step_plan/v1/models",
+      "headers": {
+        "authorization": "Bearer configured-step-key",
+        "accept-encoding": "identity",
+        "accept": "*/*",
+        "host": "127.0.0.1:52091"
+      }
+    }
+  }
+}

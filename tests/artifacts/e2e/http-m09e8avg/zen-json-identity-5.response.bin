@@ -1,0 +1,1 @@
+{"id": "native-e2e", "model": "zen-json-identity-5", "content": [{"type": "thinking", "thinking": "native passthrough"}], "choices": [{"message": {"role": "assistant", "content": "hello"}}]}

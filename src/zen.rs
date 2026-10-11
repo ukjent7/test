@@ -371,7 +371,13 @@ impl StreamFix {
                 ));
             }
         }
-        (true, changes)
+        // 桩调用被剔除后可能整个帧只剩空壳；usage 单独成帧时不能丢。
+        let emptied = !choices.is_empty()
+            && value.get("usage").is_none()
+            && choices.iter().all(|choice| {
+                choice["delta"] == json!({}) && choice["finish_reason"].is_null()
+            });
+        (!emptied, changes)
     }
 
     fn responses_frame(&mut self, value: &mut Value) -> (bool, Vec<Change>) {

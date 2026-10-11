@@ -1,0 +1,46 @@
+{
+  "request": {
+    "model": "step-5-preview",
+    "max_tokens": 512,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:17 GMT",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-request-id": "req-e2e",
+    "transfer-encoding": "chunked"
+  },
+  "upstream": {
+    "path": "/step_plan/v1/messages?beta=true",
+    "headers": {
+      "authorization": "Bearer dummy-token",
+      "accept-encoding": "identity",
+      "anthropic-beta": "test-beta",
+      "content-type": "application/json",
+      "x-e2e-case": "sse-lf",
+      "anthropic-version": "2023-06-01",
+      "host": "127.0.0.1:60495",
+      "content-length": "105",
+      "accept": "*/*"
+    },
+    "body": {
+      "max_tokens": 512,
+      "messages": [
+        {
+          "content": "你好",
+          "role": "user"
+        }
+      ],
+      "model": "step-5-preview",
+      "stream": true
+    }
+  }
+}

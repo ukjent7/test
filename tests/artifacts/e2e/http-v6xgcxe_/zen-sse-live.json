@@ -1,0 +1,68 @@
+{
+  "request": {
+    "model": "zen-sse-live",
+    "max_tokens": 512,
+    "stream": true,
+    "system": "retain system",
+    "tools": [
+      {
+        "name": "read_file",
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "first turn"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:18 GMT",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-request-id": "req-e2e",
+    "transfer-encoding": "chunked"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/messages?beta=true",
+    "headers": {
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "test-beta",
+      "x-api-key": "dummy-token",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_18344525abac0001pmWmwGDaSy",
+      "x-opencode-request": "msg_647eda696ff900043VYpTOjkIj",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "196"
+    },
+    "body": {
+      "max_tokens": 512,
+      "messages": [
+        {
+          "content": "first turn",
+          "role": "user"
+        }
+      ],
+      "model": "zen-sse-live",
+      "stream": true,
+      "system": "retain system",
+      "tools": [
+        {
+          "input_schema": {
+            "type": "object"
+          },
+          "name": "read_file"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+: upstream heartbeat
+id: event-id
+retry: 1500
+event: message_start
+data: {"message":{"content":[{"signature":"","thinking":"seed","type":"thinking"}],"id":"msg_e2e","model":"step-5-preview","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":13824,"input_tokens":411,"output_tokens":0}},"type":"message_start"}
+

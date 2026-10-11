@@ -1,0 +1,502 @@
+[
+  {
+    "model": "cache-messages-hit",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": 200,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 1,
+      "id": 42,
+      "model": "cache-messages-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793323
+    }
+  },
+  {
+    "model": "cache-messages-hit",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": 200,
+        "input_tokens": 1000,
+        "output_tokens": 23
+      },
+      "duration_ms": 1,
+      "id": 43,
+      "model": "cache-messages-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793353
+    }
+  },
+  {
+    "model": "cache-messages-zero",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "input_tokens": 100,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 44,
+      "model": "cache-messages-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793400
+    }
+  },
+  {
+    "model": "cache-messages-zero",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "input_tokens": 100,
+        "output_tokens": 23
+      },
+      "duration_ms": 2,
+      "id": 45,
+      "model": "cache-messages-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793435
+    }
+  },
+  {
+    "model": "cache-messages-unknown",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 100,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 46,
+      "model": "cache-messages-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793451
+    }
+  },
+  {
+    "model": "cache-messages-unknown",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 100,
+        "output_tokens": 23
+      },
+      "duration_ms": 1,
+      "id": 47,
+      "model": "cache-messages-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793495
+    }
+  },
+  {
+    "model": "cache-chat-hit",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": 200,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 48,
+      "model": "cache-chat-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793543
+    }
+  },
+  {
+    "model": "cache-chat-hit",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": 200,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 49,
+      "model": "cache-chat-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793562
+    }
+  },
+  {
+    "model": "cache-chat-zero",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 50,
+      "model": "cache-chat-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793592
+    }
+  },
+  {
+    "model": "cache-chat-zero",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 51,
+      "model": "cache-chat-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793623
+    }
+  },
+  {
+    "model": "cache-chat-unknown",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 52,
+      "model": "cache-chat-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793639
+    }
+  },
+  {
+    "model": "cache-chat-unknown",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 53,
+      "model": "cache-chat-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793667
+    }
+  },
+  {
+    "model": "cache-chat-deepseek",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 54,
+      "model": "cache-chat-deepseek",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793713
+    }
+  },
+  {
+    "model": "cache-chat-deepseek",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 1,
+      "id": 55,
+      "model": "cache-chat-deepseek",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793746
+    }
+  },
+  {
+    "model": "cache-responses-hit",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 56,
+      "model": "cache-responses-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793780
+    }
+  },
+  {
+    "model": "cache-responses-hit",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 700,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 1,
+      "id": 57,
+      "model": "cache-responses-hit",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793808
+    }
+  },
+  {
+    "model": "cache-responses-zero",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 58,
+      "model": "cache-responses-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793825
+    }
+  },
+  {
+    "model": "cache-responses-zero",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 2,
+      "id": 59,
+      "model": "cache-responses-zero",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793871
+    }
+  },
+  {
+    "model": "cache-responses-unknown",
+    "stream": false,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 60,
+      "model": "cache-responses-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793887
+    }
+  },
+  {
+    "model": "cache-responses-unknown",
+    "stream": true,
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": 1000,
+        "output_tokens": null
+      },
+      "duration_ms": 1,
+      "id": 61,
+      "model": "cache-responses-unknown",
+      "repairs": 0,
+      "request_changes": 0,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "cbd4e8aa41dd90d5",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793916
+    }
+  }
+]

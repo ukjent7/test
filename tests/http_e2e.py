@@ -58,6 +58,9 @@ def run(binary, checker, output, test):
         def do_POST(self):
             body = self.rfile.read(int(self.headers["content-length"]))
             case = self.headers.get("x-e2e-case") or json.loads(body)["model"]
+            # Zen 上游会重建请求头并剥掉 x-e2e-case，同 model 的两个用例只能靠路径区分。
+            if case == "mimo-v2.5-free" and "/zen/v1/messages" in self.path:
+                case = "mimo-v2.5-free-messages"
             captures[case] = {"path": self.path, "headers": dict(self.headers),
                               "body": json.loads(body)}
             attempts.setdefault(case, []).append(captures[case])
@@ -774,9 +777,9 @@ def run(binary, checker, output, test):
                                           tools=[{"type": "function", "function": {"name": "Bash"}}])
         assert status == 200
         events = decode_sse(wire)
-        call = events[0]["choices"][0]["delta"]["tool_calls"][0]
-        assert call["function"] == {"name": "Bash", "arguments": '{"command":"ls"}'}
-        assert events[1]["choices"][0]["finish_reason"] == "tool_calls"
+        assert [event["choices"][0]["delta"]["tool_calls"][0]["function"] for event in events[:2]] == [
+            {"name": "Bash", "arguments": '{"command":'}, {"arguments": '"ls"}'}]
+        assert events[2]["choices"][0]["finish_reason"] == "tool_calls"
         assert len(seen) == 2
         tools = seen[1]["body"]["tools"]
         assert tools[0]["function"]["name"] == "bash" and tools[1]["function"]["name"] == "read"

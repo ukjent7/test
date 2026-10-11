@@ -1,0 +1,47 @@
+{
+  "request": {
+    "model": "opencode/zen-json-identity-7",
+    "max_tokens": 64,
+    "stream": false,
+    "messages": [
+      {
+        "role": "user",
+        "content": "compressed 7"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:14:23 GMT",
+    "content-type": "application/json",
+    "content-length": "190"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/chat/completions",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_60aad97f8920000LXCkjO6cDqB",
+      "x-opencode-request": "msg_b0a0f80da3f7000Hq3EjujlKiM",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "116"
+    },
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "compressed 7",
+          "role": "user"
+        }
+      ],
+      "model": "zen-json-identity-7",
+      "stream": false
+    }
+  }
+}

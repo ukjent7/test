@@ -1,0 +1,16 @@
+data: {
+data:   "choices": []
+data: }
+
+data: {
+data:   "id": "chat_cache",
+data:   "choices": [],
+data:   "usage": {
+data:     "prompt_tokens": 1000,
+data:     "prompt_cache_hit_tokens": 700,
+data:     "prompt_cache_miss_tokens": 300
+data:   }
+data: }
+
+data: [DONE]
+

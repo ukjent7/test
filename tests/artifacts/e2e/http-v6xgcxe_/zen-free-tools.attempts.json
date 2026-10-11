@@ -1,0 +1,112 @@
+[
+  {
+    "path": "http://opencode.ai/zen/v1/chat/completions",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_fcee38006c9b0007ulzy487gE5",
+      "x-opencode-request": "msg_eeff0240acfa000CBO1s9t0obT",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "278"
+    },
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "PRIVATE_FREE_MESSAGE",
+          "role": "user"
+        }
+      ],
+      "model": "zen-free-tools",
+      "stream": false,
+      "tool_choice": {
+        "function": {
+          "name": "read_file"
+        },
+        "type": "function"
+      },
+      "tools": [
+        {
+          "function": {
+            "name": "read_file",
+            "parameters": {
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    }
+  },
+  {
+    "path": "http://opencode.ai/zen/v1/chat/completions",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_fcee38006c9b0007ulzy487gE5",
+      "x-opencode-request": "msg_eeff0240acfa000CBO1s9t0obT",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "603"
+    },
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "PRIVATE_FREE_MESSAGE",
+          "role": "user"
+        }
+      ],
+      "model": "zen-free-tools",
+      "stream": true,
+      "tool_choice": {
+        "function": {
+          "name": "read_file"
+        },
+        "type": "function"
+      },
+      "tools": [
+        {
+          "function": {
+            "name": "read_file",
+            "parameters": {
+              "type": "object"
+            }
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Not available in this session. Never call this tool.",
+            "name": "bash",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Not available in this session. Never call this tool.",
+            "name": "read",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    }
+  }
+]

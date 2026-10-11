@@ -1,0 +1,40 @@
+{
+  "request": {
+    "model": "opencode/mimo-v2.5-free",
+    "max_tokens": 64,
+    "stream": false,
+    "tools": [
+      {
+        "name": "Bash",
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    ],
+    "messages": [
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tool_1",
+            "name": "Bash",
+            "input": {}
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "PRIVATE_FREE_MESSAGE"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "content-type": "application/json",
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:14:24 GMT",
+    "content-length": "141"
+  },
+  "upstream": null
+}

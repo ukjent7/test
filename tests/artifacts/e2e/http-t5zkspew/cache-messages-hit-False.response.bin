@@ -1,0 +1,1 @@
+{"id": "msg_e2e", "type": "message", "role": "assistant", "model": "step-5-preview", "content": [], "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 100, "cache_read_input_tokens": 700, "cache_creation_input_tokens": 200}}

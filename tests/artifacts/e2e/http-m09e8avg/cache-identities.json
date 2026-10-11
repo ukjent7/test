@@ -1,0 +1,277 @@
+[
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": 13824,
+        "cache_write_tokens": 0,
+        "input_tokens": 14235,
+        "output_tokens": 0
+      },
+      "duration_ms": 0,
+      "id": 31,
+      "model": "opencode/zen-json-identity-0",
+      "repairs": 1,
+      "request_changes": 1,
+      "response_changes": 1,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695792965
+    }
+  },
+  {
+    "group": "side",
+    "identity": "ses_affbe12357ea000CPFC2iQHHrm",
+    "call": {
+      "cache": {
+        "cache_read_tokens": 13824,
+        "cache_write_tokens": 0,
+        "input_tokens": 14235,
+        "output_tokens": 0
+      },
+      "duration_ms": 0,
+      "id": 32,
+      "model": "opencode/zen-json-identity-1",
+      "repairs": 1,
+      "request_changes": 1,
+      "response_changes": 1,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "d53ada107899d3ae",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793008
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": 13824,
+        "cache_write_tokens": 0,
+        "input_tokens": 14235,
+        "output_tokens": 0
+      },
+      "duration_ms": 0,
+      "id": 33,
+      "model": "opencode/zen-json-identity-2",
+      "repairs": 1,
+      "request_changes": 1,
+      "response_changes": 1,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793024
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 34,
+      "model": "opencode/zen-json-identity-3",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "prompt_cache_key"
+      },
+      "status": 200,
+      "timestamp": 1791695793071
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 35,
+      "model": "opencode/zen-json-identity-4",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "prompt_cache_key"
+      },
+      "status": 200,
+      "timestamp": 1791695793105
+    }
+  },
+  {
+    "group": "side",
+    "identity": "ses_affbe12357ea000CPFC2iQHHrm",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 36,
+      "model": "opencode/zen-json-identity-5",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "d53ada107899d3ae",
+        "source": "x-grok-conv-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793150
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 37,
+      "model": "opencode/zen-json-identity-6",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "session-id"
+      },
+      "status": 200,
+      "timestamp": 1791695793183
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 38,
+      "model": "opencode/zen-json-identity-7",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "session_id"
+      },
+      "status": 200,
+      "timestamp": 1791695793227
+    }
+  },
+  {
+    "group": "canonical",
+    "identity": "ses_abcdef123456aB0Cd1Ef2Gh3Ij",
+    "call": {
+      "cache": {
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null
+      },
+      "duration_ms": 0,
+      "id": 39,
+      "model": "opencode/zen-json-identity-8",
+      "repairs": 0,
+      "request_changes": 1,
+      "response_changes": 0,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "c3c4b87a9711f357",
+        "source": "x-opencode-session"
+      },
+      "status": 200,
+      "timestamp": 1791695793274
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": 13824,
+        "cache_write_tokens": 0,
+        "input_tokens": 14235,
+        "output_tokens": 0
+      },
+      "duration_ms": 0,
+      "id": 40,
+      "model": "opencode/zen-json-identity-9",
+      "repairs": 1,
+      "request_changes": 1,
+      "response_changes": 1,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "x-session-affinity"
+      },
+      "status": 200,
+      "timestamp": 1791695793290
+    }
+  },
+  {
+    "group": "main",
+    "identity": "ses_60aad97f8920000LXCkjO6cDqB",
+    "call": {
+      "cache": {
+        "cache_read_tokens": 13824,
+        "cache_write_tokens": 0,
+        "input_tokens": 14235,
+        "output_tokens": 0
+      },
+      "duration_ms": 0,
+      "id": 41,
+      "model": "opencode/zen-json-identity-10",
+      "repairs": 1,
+      "request_changes": 1,
+      "response_changes": 1,
+      "result": "完成",
+      "routing": {
+        "fingerprint": "e09b92b2725d32ac",
+        "source": "metadata.session_id"
+      },
+      "status": 200,
+      "timestamp": 1791695793307
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "created": 7,
+      "id": "opencode/mimo-v2.5-free",
+      "object": "model",
+      "owned_by": "opencode"
+    }
+  ],
+  "object": "list",
+  "upstream_errors": [
+    "stepfun: \u6a21\u578b\u5217\u8868\u8fd4\u56de HTTP 401 Unauthorized"
+  ]
+}

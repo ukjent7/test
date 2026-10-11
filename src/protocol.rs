@@ -157,6 +157,7 @@ pub(crate) fn normalize_sse(
     usage.observe(endpoint, &value);
     let mut changes = Vec::new();
     let mut keep = true;
+    let pristine = zen.is_some().then(|| value.clone());
     if let Some(fix) = zen {
         let (kept, zen_changes) = fix.frame(&mut value, endpoint);
         changes.extend(zen_changes);
@@ -169,7 +170,9 @@ pub(crate) fn normalize_sse(
         label_changes(&mut changes, frame_number, &value);
         return (Vec::new(), changes);
     }
-    if changes.is_empty() {
+    // Zen 修复可能不带差异记录地改写帧（如续传调用丢弃、序号平移），
+    // 只要值确实变了就必须重打包，不能按原样透传。
+    if changes.is_empty() && pristine.is_none_or(|before| before == value) {
         return (frame.to_vec(), Vec::new());
     }
     label_changes(&mut changes, frame_number, &value);

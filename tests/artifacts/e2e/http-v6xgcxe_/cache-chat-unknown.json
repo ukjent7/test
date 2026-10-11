@@ -1,0 +1,47 @@
+{
+  "request": {
+    "model": "cache-chat-unknown",
+    "max_tokens": 64,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "PRIVATE_CACHE_INPUT"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:16:19 GMT",
+    "content-type": "text/event-stream",
+    "transfer-encoding": "chunked"
+  },
+  "upstream": {
+    "path": "/step_plan/v1/chat/completions",
+    "headers": {
+      "x-grok-conv-id": "PRIVATE_CACHE_SESSION",
+      "accept-encoding": "identity",
+      "authorization": "Bearer configured-step-key",
+      "content-type": "application/json",
+      "x-e2e-case": "cache-chat-unknown",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "test-beta",
+      "host": "127.0.0.1:60495",
+      "content-length": "121",
+      "accept": "*/*"
+    },
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "PRIVATE_CACHE_INPUT",
+          "role": "user"
+        }
+      ],
+      "model": "cache-chat-unknown",
+      "stream": true
+    },
+    "response_hex": "646174613a207b0a646174613a2020202263686f69636573223a205b5d0a646174613a207d0d0a0d0a646174613a207b0a646174613a202020226964223a2022636861745f6361636865222c0a646174613a2020202263686f69636573223a205b5d2c0a646174613a202020227573616765223a207b0a646174613a20202020202270726f6d70745f746f6b656e73223a20313030300a646174613a2020207d0a646174613a207d0d0a0d0a646174613a205b444f4e455d0a0a"
+  }
+}

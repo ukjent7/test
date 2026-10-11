@@ -1,0 +1,45 @@
+{
+  "request": {
+    "model": "opencode/paid-chat-model",
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "response_status": 200,
+  "response_headers": {
+    "server": "BaseHTTP Python/3.15.0rc3",
+    "date": "Sun, 11 Oct 2026 05:14:24 GMT",
+    "content-type": "text/event-stream",
+    "transfer-encoding": "chunked"
+  },
+  "upstream": {
+    "path": "http://opencode.ai/zen/v1/chat/completions?beta=true",
+    "headers": {
+      "authorization": "Bearer configured-zen-key",
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "user-agent": "opencode/1.18.34",
+      "x-opencode-session": "ses_9c4c79ef5de100076bA0Zbxs2S",
+      "x-opencode-request": "msg_0ca0069a3664000DwhBmA3FjpK",
+      "x-opencode-client": "cli",
+      "x-opencode-project": "global",
+      "accept-encoding": "identity",
+      "host": "opencode.ai",
+      "content-length": "88"
+    },
+    "body": {
+      "messages": [
+        {
+          "content": "hello",
+          "role": "user"
+        }
+      ],
+      "model": "paid-chat-model",
+      "stream": true
+    }
+  }
+}

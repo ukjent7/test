@@ -1,0 +1,1216 @@
+{
+  "schema_version": 1,
+  "suite": "http",
+  "status": "failed",
+  "cases": [
+    {
+      "name": "original-log-reproduces-error",
+      "status": "passed",
+      "elapsed_seconds": 0.609
+    },
+    {
+      "name": "sse-lf",
+      "status": "passed",
+      "elapsed_seconds": 0.777
+    },
+    {
+      "name": "sse-crlf",
+      "status": "passed",
+      "elapsed_seconds": 0.946
+    },
+    {
+      "name": "sse-live",
+      "status": "passed",
+      "elapsed_seconds": 1.094
+    },
+    {
+      "name": "json",
+      "status": "passed",
+      "elapsed_seconds": 1.113
+    },
+    {
+      "name": "sse-start-content",
+      "status": "passed",
+      "elapsed_seconds": 1.134
+    },
+    {
+      "name": "followup",
+      "status": "passed",
+      "elapsed_seconds": 1.147
+    },
+    {
+      "name": "error-401",
+      "status": "passed",
+      "elapsed_seconds": 1.162
+    },
+    {
+      "name": "error-429",
+      "status": "passed",
+      "elapsed_seconds": 1.198
+    },
+    {
+      "name": "error-500",
+      "status": "passed",
+      "elapsed_seconds": 1.229
+    },
+    {
+      "name": "redirect",
+      "status": "passed",
+      "elapsed_seconds": 1.245
+    },
+    {
+      "name": "json-invalid",
+      "status": "passed",
+      "elapsed_seconds": 1.261
+    },
+    {
+      "name": "sse-invalid",
+      "status": "passed",
+      "elapsed_seconds": 1.276
+    },
+    {
+      "name": "sse-truncated",
+      "status": "passed",
+      "elapsed_seconds": 1.291
+    },
+    {
+      "name": "/v1/unsupported",
+      "status": "passed",
+      "elapsed_seconds": 1.293
+    },
+    {
+      "name": "/v1/embeddings",
+      "status": "passed",
+      "elapsed_seconds": 1.295
+    },
+    {
+      "name": "zen-json-headers",
+      "status": "passed",
+      "elapsed_seconds": 1.325
+    },
+    {
+      "name": "zen-json-followup",
+      "status": "passed",
+      "elapsed_seconds": 1.339
+    },
+    {
+      "name": "zen-json-other-session",
+      "status": "passed",
+      "elapsed_seconds": 1.353
+    },
+    {
+      "name": "zen-json-canonical",
+      "status": "passed",
+      "elapsed_seconds": 1.368
+    },
+    {
+      "name": "zen-sse-live",
+      "status": "passed",
+      "elapsed_seconds": 1.386
+    },
+    {
+      "name": "zen-error-401",
+      "status": "passed",
+      "elapsed_seconds": 1.403
+    },
+    {
+      "name": "zen-error-429",
+      "status": "passed",
+      "elapsed_seconds": 1.431
+    },
+    {
+      "name": "zen-error-500",
+      "status": "passed",
+      "elapsed_seconds": 1.447
+    },
+    {
+      "name": "zen-json-seed",
+      "status": "passed",
+      "elapsed_seconds": 1.477
+    },
+    {
+      "name": "zen-json-seed-followup",
+      "status": "passed",
+      "elapsed_seconds": 1.491
+    },
+    {
+      "name": "zen-json-seed-other",
+      "status": "passed",
+      "elapsed_seconds": 1.523
+    },
+    {
+      "name": "zen-json-defaults",
+      "status": "passed",
+      "elapsed_seconds": 1.537
+    },
+    {
+      "name": "json-not-zen-0",
+      "status": "passed",
+      "elapsed_seconds": 1.555
+    },
+    {
+      "name": "json-not-zen-1",
+      "status": "passed",
+      "elapsed_seconds": 1.573
+    },
+    {
+      "name": "json-not-zen-2",
+      "status": "passed",
+      "elapsed_seconds": 1.602
+    },
+    {
+      "name": "json-not-zen-3",
+      "status": "passed",
+      "elapsed_seconds": 1.634
+    },
+    {
+      "name": "json-switch-back",
+      "status": "passed",
+      "elapsed_seconds": 1.652
+    },
+    {
+      "name": "zen-json-identity-0",
+      "status": "passed",
+      "elapsed_seconds": 1.669
+    },
+    {
+      "name": "zen-json-identity-1",
+      "status": "passed",
+      "elapsed_seconds": 1.698
+    },
+    {
+      "name": "zen-json-identity-2",
+      "status": "passed",
+      "elapsed_seconds": 1.715
+    },
+    {
+      "name": "zen-json-identity-3",
+      "status": "passed",
+      "elapsed_seconds": 1.733
+    },
+    {
+      "name": "zen-json-identity-4",
+      "status": "passed",
+      "elapsed_seconds": 1.753
+    },
+    {
+      "name": "zen-json-identity-5",
+      "status": "passed",
+      "elapsed_seconds": 1.769
+    },
+    {
+      "name": "zen-json-identity-6",
+      "status": "passed",
+      "elapsed_seconds": 1.822
+    },
+    {
+      "name": "zen-json-identity-7",
+      "status": "passed",
+      "elapsed_seconds": 1.869
+    },
+    {
+      "name": "zen-json-identity-8",
+      "status": "passed",
+      "elapsed_seconds": 1.897
+    },
+    {
+      "name": "zen-json-identity-9",
+      "status": "passed",
+      "elapsed_seconds": 1.946
+    },
+    {
+      "name": "zen-json-identity-10",
+      "status": "passed",
+      "elapsed_seconds": 1.994
+    },
+    {
+      "name": "cache-messages-hit-False",
+      "status": "passed",
+      "elapsed_seconds": 2.016
+    },
+    {
+      "name": "cache-messages-hit-True",
+      "status": "passed",
+      "elapsed_seconds": 2.072
+    },
+    {
+      "name": "cache-messages-zero-False",
+      "status": "passed",
+      "elapsed_seconds": 2.089
+    },
+    {
+      "name": "cache-messages-zero-True",
+      "status": "passed",
+      "elapsed_seconds": 2.105
+    },
+    {
+      "name": "cache-messages-unknown-False",
+      "status": "passed",
+      "elapsed_seconds": 2.136
+    },
+    {
+      "name": "cache-messages-unknown-True",
+      "status": "passed",
+      "elapsed_seconds": 2.166
+    },
+    {
+      "name": "cache-chat-hit-False",
+      "status": "passed",
+      "elapsed_seconds": 2.182
+    },
+    {
+      "name": "cache-chat-hit-True",
+      "status": "passed",
+      "elapsed_seconds": 2.213
+    },
+    {
+      "name": "cache-chat-zero-False",
+      "status": "passed",
+      "elapsed_seconds": 2.259
+    },
+    {
+      "name": "cache-chat-zero-True",
+      "status": "passed",
+      "elapsed_seconds": 2.289
+    },
+    {
+      "name": "cache-chat-unknown-False",
+      "status": "passed",
+      "elapsed_seconds": 2.32
+    },
+    {
+      "name": "cache-chat-unknown-True",
+      "status": "passed",
+      "elapsed_seconds": 2.349
+    },
+    {
+      "name": "cache-chat-deepseek-False",
+      "status": "passed",
+      "elapsed_seconds": 2.383
+    },
+    {
+      "name": "cache-chat-deepseek-True",
+      "status": "passed",
+      "elapsed_seconds": 2.429
+    },
+    {
+      "name": "cache-responses-hit-False",
+      "status": "passed",
+      "elapsed_seconds": 2.445
+    },
+    {
+      "name": "cache-responses-hit-True",
+      "status": "passed",
+      "elapsed_seconds": 2.462
+    },
+    {
+      "name": "cache-responses-zero-False",
+      "status": "passed",
+      "elapsed_seconds": 2.478
+    },
+    {
+      "name": "cache-responses-zero-True",
+      "status": "passed",
+      "elapsed_seconds": 2.508
+    },
+    {
+      "name": "cache-responses-unknown-False",
+      "status": "passed",
+      "elapsed_seconds": 2.524
+    },
+    {
+      "name": "cache-responses-unknown-True",
+      "status": "passed",
+      "elapsed_seconds": 2.552
+    },
+    {
+      "name": "cache-messages-delta-replaces-cumulative-usage",
+      "status": "passed",
+      "elapsed_seconds": 2.583
+    },
+    {
+      "name": "cache-native-sse-remains-live",
+      "status": "passed",
+      "elapsed_seconds": 2.598
+    },
+    {
+      "name": "prefixed-live-model-catalog-with-configured-keys",
+      "status": "passed",
+      "elapsed_seconds": 2.602
+    },
+    {
+      "name": "models-one-upstream-fails",
+      "status": "passed",
+      "elapsed_seconds": 2.615
+    },
+    {
+      "name": "models-both-upstreams-fail",
+      "status": "passed",
+      "elapsed_seconds": 2.63
+    },
+    {
+      "name": "json-stepfun-route",
+      "status": "passed",
+      "elapsed_seconds": 2.646
+    },
+    {
+      "name": "zen-json-route",
+      "status": "passed",
+      "elapsed_seconds": 2.675
+    },
+    {
+      "name": "zen-native-chat-completions-False",
+      "status": "passed",
+      "elapsed_seconds": 2.705
+    },
+    {
+      "name": "zen-native-chat-completions-True",
+      "status": "passed",
+      "elapsed_seconds": 2.738
+    },
+    {
+      "name": "zen-native-responses-False",
+      "status": "passed",
+      "elapsed_seconds": 2.752
+    },
+    {
+      "name": "zen-native-responses-True",
+      "status": "passed",
+      "elapsed_seconds": 2.783
+    },
+    {
+      "name": "free-json-collapses-real-mimo-stream",
+      "status": "passed",
+      "elapsed_seconds": 2.837
+    },
+    {
+      "name": "free-messages-collapse-anthropic-wire",
+      "status": "passed",
+      "elapsed_seconds": 2.865
+    },
+    {
+      "name": "free-tools-reasoning-usage-and-multiple-choices",
+      "status": "passed",
+      "elapsed_seconds": 2.881
+    },
+    {
+      "name": "free-responses-terminal-json",
+      "status": "passed",
+      "elapsed_seconds": 2.897
+    }
+  ],
+  "processes": [
+    {
+      "pid": 1821056,
+      "command": [
+        "C:\\Users\\kk\\AppData\\Local\\Temp\\gwbin\\messages-gateway.exe",
+        "--headless"
+      ]
+    }
+  ],
+  "commit": null,
+  "platform": "windows",
+  "python": "3.15.0rc3",
+  "started_at": "2026-10-11T05:16:17.103572+00:00",
+  "gateway_sha256": "ee3c2e63a49f846256bc3f5995d27cfae59ad61671bd01b2238f1e51b24b9684",
+  "grok_decoder_sha256": "e487a39a0366e6d1454598ccdfb3e14004039072e0d1fbb061dfacbdf89980e0",
+  "wire_checks": [
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {
+          "type": "thinking",
+          "thinking": ""
+        }
+      },
+      "result": "missing field `signature`"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_start",
+        "message": {
+          "id": "msg_e2e",
+          "type": "message",
+          "role": "assistant",
+          "model": "step-5-preview",
+          "content": [],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 411,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 13824
+          }
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 0,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "检查中文与工具调用"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "signed-"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "payload"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 0
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 1,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "unsigned reasoning"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 1
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 2,
+        "content_block": {
+          "type": "redacted_thinking",
+          "data": "opaque-redacted"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 2
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 3,
+        "content_block": {
+          "type": "text",
+          "text": ""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 3,
+        "delta": {
+          "type": "text_delta",
+          "text": "正在读取文件"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 3
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 4,
+        "content_block": {
+          "type": "tool_use",
+          "id": "tool_1",
+          "name": "read_file",
+          "input": {}
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "{\"path\":\""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "README.md\"}"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 4
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "ping"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "tool_use",
+          "stop_sequence": null
+        },
+        "usage": {
+          "output_tokens": 23
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_stop"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_start",
+        "message": {
+          "id": "msg_e2e",
+          "type": "message",
+          "role": "assistant",
+          "model": "step-5-preview",
+          "content": [],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 411,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 13824
+          }
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 0,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "检查中文与工具调用"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "signed-"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "payload"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 0
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 1,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "unsigned reasoning"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 1
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 2,
+        "content_block": {
+          "type": "redacted_thinking",
+          "data": "opaque-redacted"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 2
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 3,
+        "content_block": {
+          "type": "text",
+          "text": ""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 3,
+        "delta": {
+          "type": "text_delta",
+          "text": "正在读取文件"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 3
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 4,
+        "content_block": {
+          "type": "tool_use",
+          "id": "tool_1",
+          "name": "read_file",
+          "input": {}
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "{\"path\":\""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "README.md\"}"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 4
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "ping"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "tool_use",
+          "stop_sequence": null
+        },
+        "usage": {
+          "output_tokens": 23
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_stop"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_start",
+        "message": {
+          "id": "msg_e2e",
+          "type": "message",
+          "role": "assistant",
+          "model": "step-5-preview",
+          "content": [],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 411,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 13824
+          }
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 0,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "检查中文与工具调用"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "signed-"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "payload"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 0
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "content_block": {
+          "signature": "",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "index": 1,
+        "type": "content_block_start"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "unsigned reasoning"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 1
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 2,
+        "content_block": {
+          "type": "redacted_thinking",
+          "data": "opaque-redacted"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 2
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 3,
+        "content_block": {
+          "type": "text",
+          "text": ""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 3,
+        "delta": {
+          "type": "text_delta",
+          "text": "正在读取文件"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 3
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_start",
+        "index": 4,
+        "content_block": {
+          "type": "tool_use",
+          "id": "tool_1",
+          "name": "read_file",
+          "input": {}
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "{\"path\":\""
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_delta",
+        "index": 4,
+        "delta": {
+          "type": "input_json_delta",
+          "partial_json": "README.md\"}"
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "content_block_stop",
+        "index": 4
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "ping"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "tool_use",
+          "stop_sequence": null
+        },
+        "usage": {
+          "output_tokens": 23
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "type": "message_stop"
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "message",
+      "data": {
+        "content": [
+          {
+            "signature": "",
+            "thinking": "分析",
+            "type": "thinking"
+          },
+          {
+            "signature": "valid",
+            "thinking": "signed",
+            "type": "thinking"
+          },
+          {
+            "data": "opaque",
+            "type": "redacted_thinking"
+          },
+          {
+            "text": "完成",
+            "type": "text"
+          }
+        ],
+        "id": "msg_e2e",
+        "model": "step-5-preview",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 13824,
+          "input_tokens": 411,
+          "output_tokens": 0
+        }
+      },
+      "result": "ok"
+    },
+    {
+      "kind": "event",
+      "data": {
+        "message": {
+          "content": [
+            {
+              "signature": "",
+              "thinking": "seed",
+              "type": "thinking"
+            }
+          ],
+          "id": "msg_e2e",
+          "model": "step-5-preview",
+          "role": "assistant",
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 13824,
+            "input_tokens": 411,
+            "output_tokens": 0
+          }
+        },
+        "type": "message_start"
+      },
+      "result": "ok"
+    }
+  ],
+  "first_event_seconds": 4.539999645203352e-05,
+  "truncation_error": "IncompleteRead",
+  "duration_seconds": 6.224,
+  "error": "JSONDecodeError('Expecting value: line 1 column 2 (char 1)')",
+  "traceback": "Traceback (most recent call last):\n  File \"D:\\work\\网关项目\\tests\\common.py\", line 255, in suite_cli\n    run(*positional, **args)\n    ~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\work\\网关项目\\tests\\http_e2e.py\", line 769, in run\n    events = decode_sse(wire)\n  File \"D:\\work\\网关项目\\tests\\wire_fixtures.py\", line 90, in decode_sse\n    values.append(json.loads(data))\n                  ~~~~~~~~~~^^^^^^\n  File \"C:\\Users\\kk\\AppData\\Local\\Programs\\Python\\Python315\\Lib\\json\\__init__.py\", line 371, in loads\n    return _default_decoder.decode(s)\n           ~~~~~~~~~~~~~~~~~~~~~~~^^^\n  File \"C:\\Users\\kk\\AppData\\Local\\Programs\\Python\\Python315\\Lib\\json\\decoder.py\", line 358, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\kk\\AppData\\Local\\Programs\\Python\\Python315\\Lib\\json\\decoder.py\", line 376, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)\n"
+}
