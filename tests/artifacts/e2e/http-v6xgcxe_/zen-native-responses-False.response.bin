@@ -1,1 +1,0 @@
-{"id": "native-e2e", "model": "responses-model", "content": [{"type": "thinking", "thinking": "native passthrough"}], "choices": [{"message": {"role": "assistant", "content": "hello"}}]}

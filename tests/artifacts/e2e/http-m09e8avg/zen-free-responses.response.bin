@@ -1,1 +1,0 @@
-{"id":"resp_free","model":"zen-free-responses","object":"response","output":[{"content":[{"text":"hello","type":"output_text"}],"type":"message"}],"status":"completed","usage":{"input_tokens":5,"output_tokens":2}}

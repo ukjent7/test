@@ -7,3 +7,4 @@ __pycache__/
 /settings.tmp
 /requests.sqlite3*
 /webview/
+/tests/artifacts/
