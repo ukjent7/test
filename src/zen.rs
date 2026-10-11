@@ -191,16 +191,14 @@ impl ZenTools {
                         }
                         kept.push(call);
                     }
+                    let emptied = kept.is_empty();
                     *calls = kept;
-                    if calls.is_empty() {
+                    if emptied {
                         if let Some(message) = message.as_object_mut() {
                             message.remove("tool_calls");
                         }
                     }
-                    if choice["finish_reason"] == "tool_calls"
-                        && !self.stubs.is_empty()
-                        && calls.is_empty()
-                    {
+                    if choice["finish_reason"] == "tool_calls" && !self.stubs.is_empty() && emptied {
                         changes.push(Change::new(
                             format!("/choices/{position}/finish_reason"),
                             Some(json!("tool_calls")),
@@ -495,9 +493,9 @@ fn rename_history(request: &mut Value, endpoint: &str, from: &str, to: &str) {
         }
     };
     let conversation = if endpoint == "responses" {
-        request["input"].as_array_mut().map(Vec::iter_mut)
+        request["input"].as_array_mut().map(|items| items.iter_mut())
     } else {
-        request["messages"].as_array_mut().map(Vec::iter_mut)
+        request["messages"].as_array_mut().map(|items| items.iter_mut())
     };
     for message in conversation.into_iter().flatten() {
         match endpoint {
@@ -580,6 +578,7 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
     if request.get("tools").is_none() {
         request["tools"] = json!([]);
     }
+    let mut renames = Vec::new();
     if let Some(tools_array) = request["tools"].as_array_mut() {
         for need in ZEN_TOOLS {
             let found = tools_array
@@ -595,7 +594,7 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
                 if client != need {
                     tools.back.insert(need.to_owned(), client.clone());
                     set_tool_name(&mut tools_array[index], chat, need);
-                    rename_history(request, endpoint, &client, need);
+                    renames.push((client, need.to_owned()));
                 }
                 continue;
             }
@@ -612,6 +611,9 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
             tools_array.push(stub);
             tools.stubs.insert(need.to_owned());
         }
+    }
+    for (client, need) in &renames {
+        rename_history(request, endpoint, client, need);
     }
     let after_tools = request["tools"].clone();
     if original_tools.as_ref() != Some(&after_tools) {
