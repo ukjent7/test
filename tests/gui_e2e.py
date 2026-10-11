@@ -129,7 +129,10 @@ def run(binary, output, test):
     database = output.resolve() / "requests.sqlite3"
     database.unlink(missing_ok=True)
     env = {**os.environ, "GATEWAY_LISTEN": f"127.0.0.1:{port}",
-           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*"}
+           "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": f"--remote-debugging-port={debug_port} --remote-allow-origins=*",
+           # OpenCode 上游保持真实主机名（is_zen 依赖它），经本地代理转发。
+           "http_proxy": f"http://127.0.0.1:{upstream.server_port}",
+           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     for name in ("GATEWAY_CONFIG", "GATEWAY_DB", "WEBVIEW2_USER_DATA_FOLDER"):
         env.pop(name, None)
     env.pop("GATEWAY_UPSTREAM_BASE_URL", None)
@@ -255,7 +258,7 @@ def run(binary, output, test):
         expect(page.locator("#edit-opencode")).to_be_focused()
         passed("provider-editor-scoped-and-cancel-restores-focus")
         upstream_url = f"http://127.0.0.1:{upstream.server_port}/step_plan/v1"
-        opencode_url = f"http://127.0.0.1:{upstream.server_port}/zen/v1"
+        opencode_url = "http://opencode.ai/zen/v1"
         page.get_by_role("button", name="编辑上游", exact=True).click()
         page.get_by_label("StepFun 上游基地址", exact=True).fill(upstream_url)
         page.get_by_label("StepFun API key", exact=True).fill("GUI_STEP_KEY")
@@ -703,6 +706,8 @@ def run(binary, output, test):
         assert response.status == 200
         assert "/zen/v1/chat/completions" in upstream_calls[-1]["path"]
         assert decode_sse(response.body())[-1]["choices"][0]["finish_reason"] == "stop"
+        first = decode_sse(response.body())[0]["choices"][0]["delta"]
+        assert first["reasoning_content"] == "GUI_RESPONSE_REASONING" and "reasoning" not in first
         detail = latest_detail()
         changes = detail["diff"]["response"]
         assert changes, "free-tier reasoning rename must be recorded"
