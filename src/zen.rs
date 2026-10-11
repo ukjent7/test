@@ -96,6 +96,7 @@ pub fn prepare_headers(
 pub struct ZenTools {
     back: BTreeMap<String, String>, // 提供给 Zen 的名字 → 客户端原名
     stubs: BTreeSet<String>,        // 客户端没有、只为 Zen 补的名字
+    schemas: BTreeMap<String, Value>, // 客户端原名 → 参数 schema
 }
 
 impl ZenTools {
@@ -230,6 +231,65 @@ impl StreamFix {
         }
     }
 
+    /// 上游参数要同时满足 JSON 完整与工具必填字段才下发：原生流经常
+    /// 缺字段或串台，仅 JSON 合法不足以让客户端接受。
+    fn args_valid(schemas: &BTreeMap<String, Value>, name: &str, text: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(text) else {
+            return false;
+        };
+        let Some(schema) = schemas.get(name) else {
+            return true;
+        };
+        let Some(object) = value.as_object() else {
+            return false;
+        };
+        schema["required"].as_array().is_none_or(|required| {
+            required
+                .iter()
+                .all(|field| object.contains_key(field.as_str().unwrap_or("")))
+        })
+    }
+
+    /// 被动扫描 content 里的 <tool_call> 文本标记：不改写 content，
+    /// 只在标记段完整时解析出调用（名字与参数原文）。
+    fn scan_markup(&mut self, chunk: &str) -> Vec<(String, Vec<(String, String)>)> {
+        let mut calls = Vec::new();
+        let mut buffer = match self.markup.take() {
+            Some(mut buffer) => {
+                buffer.push_str(chunk);
+                buffer
+            }
+            None => {
+                let Some(start) = chunk.find("<tool_call>") else {
+                    return calls;
+                };
+                chunk[start..].to_owned()
+            }
+        };
+        loop {
+            let Some(end) = buffer.find("</tool_call>") else {
+                break;
+            };
+            if let Some(call) = parse_markup_call(&buffer[..end]) {
+                calls.push(call);
+            }
+            buffer.drain(..end + "</tool_call>".len());
+            match buffer.find("<tool_call>") {
+                Some(start) => {
+                    buffer.drain(..start);
+                }
+                None => {
+                    buffer.clear();
+                    break;
+                }
+            }
+        }
+        if !buffer.is_empty() {
+            self.markup = Some(buffer);
+        }
+        calls
+    }
+
     fn messages_frame(&mut self, value: &mut Value) -> (bool, Vec<Change>) {
         match value["type"].as_str() {
             Some("content_block_start") => {
@@ -312,83 +372,154 @@ impl StreamFix {
                 continue;
             };
             rename_reasoning(delta, choice_index, &mut changes);
-            let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) else {
-                continue;
-            };
+            // 模型常把完整调用以 <tool_call> 文本混在 content 里，而上游
+            // 转出的原生参数流残缺、串台。文本标记才是可靠来源：解析出
+            // 完整调用后按名字补到未完成的序号上，否则追加新序号。
+            let content = delta.get("content").and_then(Value::as_str).unwrap_or("");
+            let markup_calls = self.scan_markup(content);
             let dropped = self.dropped_calls.entry(choice_index).or_default();
             let mut kept = Vec::new();
-            for mut call in calls.drain(..) {
-                let call_index = call["index"].as_u64().unwrap_or(0);
-                let name = call["function"]["name"].as_str().unwrap_or("").to_owned();
-                if self.tools.is_stub(&name) {
-                    self.stub_calls.insert((choice_index, call_index));
-                    *dropped += 1;
-                    changes.push(Change::new(
-                        format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
-                        Some(call),
-                        None,
-                        "丢弃 Zen 免费层桩工具调用",
-                    ));
-                    continue;
-                }
-                if self.stub_calls.contains(&(choice_index, call_index)) {
-                    continue;
-                }
-                if !name.is_empty() {
-                    if let Some(client) = self.tools.client_name(&name) {
-                        let before = call.clone();
-                        call["function"]["name"] = client.into();
+            if let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
+                for mut call in calls.drain(..) {
+                    let call_index = call["index"].as_u64().unwrap_or(0);
+                    let name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                    if self.tools.is_stub(&name) {
+                        self.stub_calls.insert((choice_index, call_index));
+                        *dropped += 1;
                         changes.push(Change::new(
                             format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
-                            Some(before),
-                            Some(call.clone()),
-                            "Zen 免费层工具名回改",
+                            Some(call),
+                            None,
+                            "丢弃 Zen 免费层桩工具调用",
                         ));
-                    }
-                    self.calls_made = true;
-                }
-                // 免费模型会在同一序号上重试参数：每轮重试以空参数帧开头，
-                // 中途放弃。只有累积成完整 JSON 才把真实参数发给客户端，
-                // 重试标记出现时丢弃尚未下发的残缺片段，客户端永远只看到
-                // 完整的最后一次尝试。
-                let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
-                let fragment = call["function"]["arguments"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_owned();
-                let entry = self
-                    .call_args
-                    .entry((choice_index, call_index))
-                    .or_default();
-                if entry.flushed {
-                    if !fragment.is_empty() {
-                        changes.push(Change::new(path, None, None, "丢弃完整参数后的多余片段"));
                         continue;
                     }
-                } else if fragment.is_empty() {
-                    if !entry.text.is_empty() {
-                        changes.push(Change::new(path, None, None, "丢弃重试前残缺的工具参数"));
-                        entry.text.clear();
+                    if self.stub_calls.contains(&(choice_index, call_index)) {
+                        continue;
                     }
-                } else {
-                    entry.text.push_str(&fragment);
-                    if serde_json::from_str::<Value>(&entry.text).is_ok() {
-                        entry.flushed = true;
-                        call["function"]["arguments"] = json!(entry.text.clone());
+                    // 序号上的工具名统一记客户端原名，与 schema 和文本
+                    // 标记里的名字一致。
+                    let client = self.tools.client_name(&name).unwrap_or(&name).to_owned();
+                    if !client.is_empty() {
+                        if client != name {
+                            let before = call.clone();
+                            call["function"]["name"] = client.clone().into();
+                            changes.push(Change::new(
+                                format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
+                                Some(before),
+                                Some(call.clone()),
+                                "Zen 免费层工具名回改",
+                            ));
+                        }
+                        self.calls_made = true;
+                    }
+                    // 免费模型会在同一序号上重试参数：每轮重试以空参数帧
+                    // 开头，中途放弃。参数累积到 JSON 完整且满足工具必填
+                    // 字段才下发，重试标记出现时丢弃尚未下发的残缺片段，
+                    // 客户端只看到最后一次有效尝试。
+                    let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
+                    let fragment = call["function"]["arguments"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned();
+                    let entry = self
+                        .call_args
+                        .entry((choice_index, call_index))
+                        .or_default();
+                    if !client.is_empty() {
+                        entry.name = client;
+                    }
+                    if entry.flushed {
+                        if !fragment.is_empty() {
+                            changes.push(Change::new(path, None, None, "丢弃完整参数后的多余片段"));
+                            continue;
+                        }
+                    } else if fragment.is_empty() {
+                        if !entry.text.is_empty() {
+                            changes.push(Change::new(path, None, None, "丢弃重试前残缺的工具参数"));
+                            entry.text.clear();
+                        }
                     } else {
-                        call["function"]["arguments"] = json!("");
+                        entry.text.push_str(&fragment);
+                        if Self::args_valid(&self.tools.schemas, &entry.name, &entry.text) {
+                            entry.flushed = true;
+                            call["function"]["arguments"] = json!(entry.text.clone());
+                        } else {
+                            call["function"]["arguments"] = json!("");
+                        }
                     }
+                    if *dropped > 0 {
+                        call["index"] = json!(call_index - *dropped);
+                    }
+                    let max = self.max_index.entry(choice_index).or_insert(0);
+                    *max = (*max).max(call_index.saturating_sub(*dropped));
+                    kept.push(call);
                 }
-                if *dropped > 0 {
-                    call["index"] = json!(call_index - *dropped);
+                *calls = kept;
+                if calls.is_empty()
+                    && let Some(delta) = delta.as_object_mut()
+                {
+                    delta.remove("tool_calls");
                 }
-                kept.push(call);
             }
-            *calls = kept;
-            if calls.is_empty()
-                && let Some(delta) = delta.as_object_mut()
-            {
-                delta.remove("tool_calls");
+            for (name, params) in markup_calls {
+                let mut object = serde_json::Map::new();
+                for (key, raw) in &params {
+                    let typed = match self.tools.schemas.get(&name) {
+                        Some(schema) => typed_value(schema, key, raw),
+                        None => json!(raw),
+                    };
+                    object.insert(key.clone(), typed);
+                }
+                let args = serde_json::to_string(&object).unwrap();
+                let matched = self
+                    .call_args
+                    .iter_mut()
+                    .find(|((choice, _), entry)| {
+                        *choice == choice_index && !entry.flushed && entry.name == name
+                    })
+                    .map(|(key, entry)| {
+                        entry.flushed = true;
+                        key.1.saturating_sub(*dropped)
+                    });
+                let entry = match matched {
+                    Some(index) => json!({"index": index,
+                        "function": {"arguments": args}}),
+                    None => {
+                        let index = self
+                            .max_index
+                            .get(&choice_index)
+                            .copied()
+                            .map_or(0, |max| max + 1);
+                        self.max_index.insert(choice_index, index);
+                        self.synthetic += 1;
+                        let mut hasher = DefaultHasher::new();
+                        (choice_index, index, self.synthetic).hash(&mut hasher);
+                        self.call_args.insert(
+                            (choice_index, index + *dropped),
+                            CallArgs {
+                                name: name.clone(),
+                                text: String::new(),
+                                flushed: true,
+                            },
+                        );
+                        json!({"index": index, "id": format!("call_{:016x}", hasher.finish()),
+                            "type": "function",
+                            "function": {"name": name, "arguments": args}})
+                    }
+                };
+                if let Some(array) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
+                    array.push(entry);
+                } else {
+                    delta["tool_calls"] = json!([entry]);
+                }
+                changes.push(Change::new(
+                    format!("/choices/{choice_index}/delta/tool_calls"),
+                    None,
+                    None,
+                    "从文本工具标记重建工具调用",
+                ));
+                self.calls_made = true;
             }
         }
         for choice in choices.iter_mut() {
@@ -509,6 +640,61 @@ impl StreamFix {
         {
             value[field] = json!(index - dropped);
         }
+    }
+}
+
+/// 解析单个 <tool_call> 标记段（不含收尾标签）：<function=名字> 后跟
+/// 一串 <parameter=键>值</parameter>；结构不符时放弃，content 原样保留。
+fn parse_markup_call(region: &str) -> Option<(String, Vec<(String, String)>)> {
+    let rest = region.strip_prefix("<tool_call>")?.trim_start();
+    let rest = rest.strip_prefix("<function=")?;
+    let end = rest.find('>')?;
+    let name = rest[..end].trim().to_owned();
+    let mut rest = &rest[end + 1..];
+    let mut params = Vec::new();
+    loop {
+        let Some(item) = rest.strip_prefix("<parameter=") else {
+            break;
+        };
+        let Some(end) = item.find('>') else {
+            break;
+        };
+        let key = item[..end].trim().to_owned();
+        let after = &item[end + 1..];
+        let Some(value_end) = after.find("</parameter>") else {
+            break;
+        };
+        params.push((key, after[..value_end].to_owned()));
+        rest = after[value_end + "</parameter>".len()..].trim_start();
+    }
+    if name.is_empty() {
+        return None;
+    }
+    Some((name, params))
+}
+
+/// 按工具 schema 把文本参数值转成声明类型，避免客户端把布尔或数字
+/// 当字符串拒绝反序列化。
+fn typed_value(schema: &Value, key: &str, raw: &str) -> Value {
+    let kind = schema["properties"][key]["type"].as_str().unwrap_or("");
+    match kind {
+        "boolean" => match raw.trim() {
+            "true" => json!(true),
+            "false" => json!(false),
+            _ => json!(raw),
+        },
+        "integer" => raw
+            .trim()
+            .parse::<i64>()
+            .map(|value| json!(value))
+            .unwrap_or_else(|_| json!(raw)),
+        "number" => raw
+            .trim()
+            .parse::<f64>()
+            .map(|value| json!(value))
+            .unwrap_or_else(|_| json!(raw)),
+        "array" | "object" => serde_json::from_str(raw).unwrap_or_else(|_| json!(raw)),
+        _ => json!(raw),
     }
 }
 
@@ -664,6 +850,23 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
         return (Vec::new(), tools);
     }
     let chat = endpoint == "chat/completions";
+    // 记录每个客户端工具的参数 schema：流式修复用它校验上游参数的
+    // 完整性，并把文本标记里的参数值转成声明类型。
+    if let Some(tools_array) = request.get("tools").and_then(Value::as_array) {
+        for tool in tools_array {
+            let name = tool_name(tool, chat).to_owned();
+            let schema = if chat {
+                &tool["function"]["parameters"]
+            } else if endpoint == "responses" {
+                &tool["parameters"]
+            } else {
+                &tool["input_schema"]
+            };
+            if schema.is_object() {
+                tools.schemas.insert(name, schema.clone());
+            }
+        }
+    }
     let mut changes = Vec::new();
     if request.get("stream").and_then(Value::as_bool) != Some(true) {
         changes.push(Change::new(
@@ -728,15 +931,17 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
     (changes, tools)
 }
 
-/// 同一序号工具参数的缓冲：累积片段、是否已把完整参数发给客户端。
+/// 同一序号工具参数的缓冲：累积片段、是否已把参数发给客户端、序号上的
+/// 工具名。
 #[derive(Default)]
 struct CallArgs {
+    name: String,
     text: String,
     flushed: bool,
 }
 
 /// 免费层流式的逐帧修复状态：桩块的索引、桩调用的序号、真实调用计数、
-/// 未下发的工具参数。
+/// 未下发的工具参数、content 里的文本标记缓冲。
 pub struct StreamFix {
     tools: ZenTools,
     stub_blocks: BTreeSet<u64>,
@@ -747,6 +952,9 @@ pub struct StreamFix {
     stub_ids: BTreeSet<String>,
     dropped_items: u64,
     call_args: BTreeMap<(u64, u64), CallArgs>,
+    markup: Option<String>,
+    max_index: BTreeMap<u64, u64>,
+    synthetic: u64,
 }
 
 impl StreamFix {
@@ -761,6 +969,9 @@ impl StreamFix {
             stub_ids: BTreeSet::new(),
             dropped_items: 0,
             call_args: BTreeMap::new(),
+            markup: None,
+            max_index: BTreeMap::new(),
+            synthetic: 0,
         }
     }
 }

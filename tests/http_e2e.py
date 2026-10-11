@@ -163,6 +163,34 @@ def run(binary, checker, output, test):
                                    "reasoning_content": "kept"}}]},
                               {"choices": [{"index": 0, "delta": {"content": "visible"}, "finish_reason": "stop"}]}]
                     wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+                elif case == "zen-free-tool-markup":
+                    # 复现真实故障：原生参数流把别的调用的参数串到本序号
+                    # 上（JSON 合法但缺必填字段），而 content 里的
+                    # <tool_call> 文本标记带着完整参数；收尾帧还混入下一
+                    # 个调用的残缺片段。
+                    def call_fragment(args, index=0):
+                        return {"choices": [{"index": 0, "delta": {"tool_calls": [
+                            {"index": index, "function": {"arguments": args}}]}}]}
+                    chunks = [
+                        {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
+                            {"index": 0, "id": "call_ls", "type": "function",
+                             "function": {"name": "list_dir", "arguments": ""}}]}}]},
+                        call_fragment(""),
+                        call_fragment('{"target_directory": "/home/kk"}'),
+                        {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
+                            {"index": 1, "id": "call_hg", "type": "function",
+                             "function": {"name": "hashline_grep", "arguments": ""}}]}}]},
+                        call_fragment("", index=1),
+                        call_fragment('{"target_directory": "/home/kk/.grok"}', index=1),
+                        {"choices": [{"index": 0, "delta": {"content":
+                            '<tool_call><function=hashline_grep><parameter=-i>true</parameter>'
+                            '<parameter=glob>*.{json,toml}</parameter>'
+                            '<parameter=pattern>model|grok</parameter>'
+                            '</function></tool_call>'}}]},
+                        call_fragment('{"limit": ', index=1),
+                        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+                    ]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
                 elif case == "zen-free-invalid":
                     wire = b"data: invalid\n\ndata: [DONE]\n\n"
                 elif case in ("zen-free-tool-restart", "zen-free-tool-truncated"):
@@ -837,6 +865,32 @@ def run(binary, checker, output, test):
         assert events[1]["choices"][0]["finish_reason"] == "tool_calls"
         (output / "zen-free-tool-truncated.sse").write_text(wire.decode(), encoding="utf-8")
         passed("free-tool-args-truncated-sent-with-finish")
+        status, _, wire, seen = free_post("zen-free-tool-markup", streaming=True, tools=[
+            {"type": "function", "function": {"name": "list_dir",
+             "parameters": {"type": "object", "required": ["target_directory"],
+                            "properties": {"target_directory": {"type": "string"}}}}},
+            {"type": "function", "function": {"name": "hashline_grep",
+             "parameters": {"type": "object", "required": ["pattern"],
+                            "properties": {"-i": {"type": "boolean"}, "glob": {"type": "string"},
+                                           "pattern": {"type": "string"}}}}}])
+        assert status == 200
+        events = decode_sse(wire)
+        calls = {}
+        for event in events:
+            delta = event["choices"][0].get("delta") or {}
+            for call in delta.get("tool_calls") or []:
+                calls[call["index"]] = calls.get(call["index"], "") + (call["function"].get("arguments") or "")
+        # 原生流串台的参数被扣住，客户端拿到的是文本标记重建的完整参数。
+        assert json.loads(calls[0]) == {"target_directory": "/home/kk"}
+        assert json.loads(calls[1]) == {"-i": True, "glob": "*.{json,toml}", "pattern": "model|grok"}
+        assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
+        assert len(seen) == 2
+        _, detail = get(f"/ui/calls/{latest_call('opencode/zen-free-tool-markup')['id']}")
+        reasons = [change["reason"] for change in detail["diff"]["response"]]
+        assert reasons.count("从文本工具标记重建工具调用") == 1
+        assert reasons.count("丢弃完整参数后的多余片段") == 1
+        (output / "zen-free-tool-markup.sse").write_text(wire.decode(), encoding="utf-8")
+        passed("free-tool-markup-rebuilds-broken-native-args")
         status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
         assert status == 200
         events = decode_sse(wire)
