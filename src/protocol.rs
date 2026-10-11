@@ -138,7 +138,7 @@ pub(crate) fn normalize_sse(
     frame_number: usize,
     endpoint: &str,
     usage: &mut cache::Usage,
-    mut zen: Option<&mut zen::StreamFix>,
+    zen: Option<&mut zen::StreamFix>,
 ) -> (Vec<u8>, Vec<Change>) {
     let Ok(text) = std::str::from_utf8(frame) else {
         return (frame.to_vec(), Vec::new());

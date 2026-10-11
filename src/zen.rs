@@ -351,7 +351,9 @@ impl StreamFix {
                 kept.push(call);
             }
             *calls = kept;
-            if calls.is_empty() && let Some(delta) = delta.as_object_mut() {
+            if calls.is_empty()
+                && let Some(delta) = delta.as_object_mut()
+            {
                 delta.remove("tool_calls");
             }
         }
@@ -510,14 +512,18 @@ fn rename_history(request: &mut Value, endpoint: &str, from: &str, to: &str) {
                 }
             }
             "responses" => {
-                if message["type"] == "function_call" && let Some(name) = message.get_mut("name") {
+                if message["type"] == "function_call"
+                    && let Some(name) = message.get_mut("name")
+                {
                     rename(name);
                 }
             }
             _ => {
                 if let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) {
                     for block in blocks {
-                        if block["type"] == "tool_use" && let Some(name) = block.get_mut("name") {
+                        if block["type"] == "tool_use"
+                            && let Some(name) = block.get_mut("name")
+                        {
                             rename(name);
                         }
                     }
