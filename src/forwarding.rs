@@ -120,7 +120,7 @@ async fn forward(
     let client_streaming = request["stream"].as_bool().unwrap_or(false);
     let mut collapse = false;
     // Zen 免费模型在发送前就按免费层形态整形；未知免费模型仍由 403 兜底补齐一次。
-    let zen_free = zen::is_zen(&url) && zen::is_free_model(&wire_model);
+    let zen_free = zen::is_zen(&url) && zen::is_free_model(wire_model);
     let mut zen_tools = None;
     if zen_free {
         let (changes, tools) = zen::prepare_free_body(&mut request, &endpoint);

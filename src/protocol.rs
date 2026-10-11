@@ -157,7 +157,7 @@ pub(crate) fn normalize_sse(
     usage.observe(endpoint, &value);
     let mut changes = Vec::new();
     let mut keep = true;
-    if let Some(fix) = zen.as_deref_mut() {
+    if let Some(fix) = zen {
         let (kept, zen_changes) = fix.frame(&mut value, endpoint);
         changes.extend(zen_changes);
         keep = kept;

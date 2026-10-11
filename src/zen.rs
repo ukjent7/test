@@ -193,12 +193,11 @@ impl ZenTools {
                     }
                     let emptied = kept.is_empty();
                     *calls = kept;
-                    if emptied {
-                        if let Some(message) = message.as_object_mut() {
-                            message.remove("tool_calls");
-                        }
+                    if emptied && let Some(message) = message.as_object_mut() {
+                        message.remove("tool_calls");
                     }
-                    if choice["finish_reason"] == "tool_calls" && !self.stubs.is_empty() && emptied {
+                    if choice["finish_reason"] == "tool_calls" && !self.stubs.is_empty() && emptied
+                    {
                         changes.push(Change::new(
                             format!("/choices/{position}/finish_reason"),
                             Some(json!("tool_calls")),
@@ -352,10 +351,8 @@ impl StreamFix {
                 kept.push(call);
             }
             *calls = kept;
-            if calls.is_empty() {
-                if let Some(delta) = delta.as_object_mut() {
-                    delta.remove("tool_calls");
-                }
+            if calls.is_empty() && let Some(delta) = delta.as_object_mut() {
+                delta.remove("tool_calls");
             }
         }
         for choice in choices.iter_mut() {
@@ -469,7 +466,7 @@ fn fix_output(output: &mut Vec<Value>, changes: &mut Vec<Change>, tools: &ZenToo
     *output = kept;
 }
 
-fn tool_name<'a>(tool: &'a Value, chat: bool) -> &'a str {
+fn tool_name(tool: &Value, chat: bool) -> &str {
     if chat {
         tool["function"]["name"].as_str().unwrap_or("")
     } else {
@@ -493,9 +490,13 @@ fn rename_history(request: &mut Value, endpoint: &str, from: &str, to: &str) {
         }
     };
     let conversation = if endpoint == "responses" {
-        request["input"].as_array_mut().map(|items| items.iter_mut())
+        request["input"]
+            .as_array_mut()
+            .map(|items| items.iter_mut())
     } else {
-        request["messages"].as_array_mut().map(|items| items.iter_mut())
+        request["messages"]
+            .as_array_mut()
+            .map(|items| items.iter_mut())
     };
     for message in conversation.into_iter().flatten() {
         match endpoint {
@@ -509,19 +510,15 @@ fn rename_history(request: &mut Value, endpoint: &str, from: &str, to: &str) {
                 }
             }
             "responses" => {
-                if message["type"] == "function_call" {
-                    if let Some(name) = message.get_mut("name") {
-                        rename(name);
-                    }
+                if message["type"] == "function_call" && let Some(name) = message.get_mut("name") {
+                    rename(name);
                 }
             }
             _ => {
                 if let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) {
                     for block in blocks {
-                        if block["type"] == "tool_use" {
-                            if let Some(name) = block.get_mut("name") {
-                                rename(name);
-                            }
+                        if block["type"] == "tool_use" && let Some(name) = block.get_mut("name") {
+                            rename(name);
                         }
                     }
                 }
