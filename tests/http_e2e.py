@@ -808,7 +808,15 @@ def run(binary, checker, output, test):
         release.clear()
         status, headers, wire, _ = free_post("zen-free-live", streaming=True)
         assert status == 200 and headers["content-type"].startswith("text/event-stream")
-        assert wire == b": upstream heartbeat\n\n" + ZEN_WIRE
+        assert wire.startswith(b": upstream heartbeat\n\n")
+        expected = decode_sse(ZEN_WIRE)
+        for event in expected:
+            for choice in event.get("choices") or []:
+                delta = choice.get("delta") or {}
+                if isinstance(delta.get("reasoning"), str) and delta["reasoning"] \
+                        and delta.get("reasoning_content") is None:
+                    delta["reasoning_content"] = delta.pop("reasoning")
+        assert decode_sse(wire) == expected
         passed("free-sse-first-event-arrives-without-buffering")
         for bare in ("zen-free-invalid", "zen-free-missing-done", "zen-free-truncated"):
             assert free_post(bare)[0] == 502

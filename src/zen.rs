@@ -453,7 +453,8 @@ fn rename_reasoning(delta: &mut Value, choice_index: u64, changes: &mut Vec<Chan
     let Some(text) = delta.get("reasoning").and_then(Value::as_str) else {
         return;
     };
-    if text.is_empty() || delta.get("reasoning_content").is_some_and(|value| !value.is_null()) {
+    let taken = matches!(delta.get("reasoning_content"), Some(value) if !value.is_null());
+    if text.is_empty() || taken {
         return;
     }
     delta["reasoning_content"] = json!(text);
