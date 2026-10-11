@@ -151,6 +151,7 @@
     "diff-empty-expired-and-local-only",
     "diff-json-request-response-and-literal-content",
     "diff-sse-event-index-and-theme",
+    "diff-path-only-changes-render-without-payload",
     "byte-diff-whitespace-full-error-filter-and-copy",
     "json-body-diff-reordering-single-field-and-lazy-bytes",
     "byte-diff-budget-fallback-shows-changes-and-preserves-full-data",
