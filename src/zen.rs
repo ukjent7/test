@@ -142,9 +142,9 @@ impl ZenTools {
                     }
                     *blocks = kept;
                 }
-                let real_calls = value["content"].as_array().is_some_and(|blocks| {
-                    blocks.iter().any(|block| block["type"] == "tool_use")
-                });
+                let real_calls = value["content"]
+                    .as_array()
+                    .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_use"));
                 if value["stop_reason"] == "tool_use" && !self.stubs.is_empty() && !real_calls {
                     changes.push(Change::new(
                         "/stop_reason".into(),
@@ -199,7 +199,7 @@ impl ZenTools {
                     }
                     if choice["finish_reason"] == "tool_calls"
                         && !self.stubs.is_empty()
-                        && kept.is_empty()
+                        && calls.is_empty()
                     {
                         changes.push(Change::new(
                             format!("/choices/{position}/finish_reason"),
@@ -240,7 +240,10 @@ impl StreamFix {
                 let mut changes = Vec::new();
                 let mut keep = true;
                 if value["content_block"]["type"] == "tool_use" {
-                    let name = value["content_block"]["name"].as_str().unwrap_or("").to_owned();
+                    let name = value["content_block"]["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned();
                     if self.tools.is_stub(&name) {
                         changes.push(Change::new(
                             format!("/content_block/{index}"),
@@ -315,7 +318,7 @@ impl StreamFix {
             };
             let dropped = self.dropped_calls.entry(choice_index).or_default();
             let mut kept = Vec::new();
-            for call in calls.drain(..) {
+            for mut call in calls.drain(..) {
                 let call_index = call["index"].as_u64().unwrap_or(0);
                 let name = call["function"]["name"].as_str().unwrap_or("").to_owned();
                 if self.tools.is_stub(&name) {
@@ -492,9 +495,9 @@ fn rename_history(request: &mut Value, endpoint: &str, from: &str, to: &str) {
         }
     };
     let conversation = if endpoint == "responses" {
-        request["input"].as_array_mut().map(Vec::into_iter)
+        request["input"].as_array_mut().map(Vec::iter_mut)
     } else {
-        request["messages"].as_array_mut().map(Vec::into_iter)
+        request["messages"].as_array_mut().map(Vec::iter_mut)
     };
     for message in conversation.into_iter().flatten() {
         match endpoint {
@@ -564,7 +567,7 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
     }
     let chat = endpoint == "chat/completions";
     let mut changes = Vec::new();
-    if !request.get("stream").is_some_and(Value::is_true) {
+    if request.get("stream").and_then(Value::as_bool) != Some(true) {
         changes.push(Change::new(
             "/stream".into(),
             request.get("stream").cloned(),
@@ -725,7 +728,9 @@ pub fn collapse_messages(bytes: &[u8]) -> Result<Value, ApiError> {
             }
             Some("content_block_start") => {
                 let index = event["index"].as_u64().unwrap_or(
-                    message["content"].as_array().map_or(0, |blocks| blocks.len()),
+                    message["content"]
+                        .as_array()
+                        .map_or(0, |blocks| blocks.len() as u64),
                 ) as usize;
                 let Some(blocks) = message["content"].as_array_mut() else {
                     continue;
