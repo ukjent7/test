@@ -154,6 +154,15 @@ def run(binary, checker, output, test):
                                   {"index": 0, "function": {"arguments": '"ls"}'}}]}}]},
                               {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
                     wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+                elif case == "zen-free-reasoning-alias":
+                    details = [{"type": "reasoning.text", "text": "thinking", "format": "unknown", "index": 0}]
+                    chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
+                                   "reasoning": "thinking", "reasoning_details": details}}]},
+                              {"choices": [{"index": 0, "delta": {"reasoning": ""}}]},
+                              {"choices": [{"index": 0, "delta": {"reasoning": "upstream-dup",
+                                   "reasoning_content": "kept"}}]},
+                              {"choices": [{"index": 0, "delta": {"content": "visible"}, "finish_reason": "stop"}]}]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
                 elif case == "zen-free-invalid":
                     wire = b"data: invalid\n\ndata: [DONE]\n\n"
                 elif case == "zen-free-missing-done":
@@ -784,6 +793,18 @@ def run(binary, checker, output, test):
         tools = seen[1]["body"]["tools"]
         assert tools[0]["function"]["name"] == "bash" and tools[1]["function"]["name"] == "read"
         passed("free-tool-renamed-roundtrip")
+        status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
+        assert status == 200
+        events = decode_sse(wire)
+        delta = events[0]["choices"][0]["delta"]
+        assert delta["reasoning_content"] == "thinking" and "reasoning" not in delta
+        assert delta["reasoning_details"][0]["text"] == "thinking"
+        assert events[1]["choices"][0]["delta"] == {"reasoning": ""}
+        assert events[2]["choices"][0]["delta"] == {"reasoning": "upstream-dup", "reasoning_content": "kept"}
+        assert events[3]["choices"][0]["delta"] == {"content": "visible"}
+        assert events[3]["choices"][0]["finish_reason"] == "stop"
+        (output / "zen-free-reasoning-alias.sse").write_text(wire.decode(), encoding="utf-8")
+        passed("free-reasoning-alias-renamed-to-reasoning-content")
         release.clear()
         status, headers, wire, _ = free_post("zen-free-live", streaming=True)
         assert status == 200 and headers["content-type"].startswith("text/event-stream")

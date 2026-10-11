@@ -79,6 +79,7 @@
     "free-messages-collapse-anthropic-wire",
     "free-stub-call-dropped-and-stop-reclassified",
     "free-tool-renamed-roundtrip",
+    "free-reasoning-alias-renamed-to-reasoning-content",
     "free-tools-reasoning-usage-and-multiple-choices",
     "free-responses-terminal-json",
     "free-sse-first-event-arrives-without-buffering",

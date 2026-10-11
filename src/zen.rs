@@ -311,6 +311,7 @@ impl StreamFix {
             let Some(delta) = choice.get_mut("delta") else {
                 continue;
             };
+            rename_reasoning(delta, choice_index, &mut changes);
             let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) else {
                 continue;
             };
@@ -443,6 +444,28 @@ impl StreamFix {
             value[field] = json!(index - dropped);
         }
     }
+}
+
+/// Zen 免费层用 `reasoning` 承载思维链，客户端只认 `reasoning_content`：
+/// 搬到标准字段名并删掉原名；空串或标准字段已有值时不动。
+/// 改动只记路径不搬正文，避免把思维链复制进差异视图。
+fn rename_reasoning(delta: &mut Value, choice_index: u64, changes: &mut Vec<Change>) {
+    let Some(text) = delta.get("reasoning").and_then(Value::as_str) else {
+        return;
+    };
+    if text.is_empty() || delta.get("reasoning_content").is_some_and(|value| !value.is_null()) {
+        return;
+    }
+    delta["reasoning_content"] = json!(text);
+    if let Some(object) = delta.as_object_mut() {
+        object.remove("reasoning");
+    }
+    changes.push(Change::new(
+        format!("/choices/{choice_index}/delta/reasoning"),
+        None,
+        None,
+        "思维链字段回改为 reasoning_content",
+    ));
 }
 
 fn fix_output(output: &mut Vec<Value>, changes: &mut Vec<Change>, tools: &ZenTools) {
