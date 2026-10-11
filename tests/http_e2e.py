@@ -177,7 +177,7 @@ def run(binary, checker, output, test):
                                          "function": {"name": "read_file", "arguments": ""}}]}}]},
                             call_fragment(""), call_fragment('{"path": '), call_fragment(""),
                             call_fragment('{"path": '), call_fragment(""),
-                            call_fragment('"README'), call_fragment('.md"}'),
+                            call_fragment('{"path": '), call_fragment('"README'), call_fragment('.md"}'),
                             {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
                     else:
                         chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
@@ -817,10 +817,10 @@ def run(binary, checker, output, test):
         assert status == 200
         events = decode_sse(wire)
         args = [event["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"]
-                for event in events[:8]]
+                for event in events[:9]]
         # 中途重试的残缺片段永不外发，客户端按序聚合得到完整的最后一次尝试。
-        assert args == ["", "", "", "", "", "", "", '{"path": "README.md"}'], args
-        assert events[8]["choices"][0]["finish_reason"] == "tool_calls"
+        assert args == ["", "", "", "", "", "", "", "", '{"path": "README.md"}'], args
+        assert events[9]["choices"][0]["finish_reason"] == "tool_calls"
         _, detail = get(f"/ui/calls/{latest_call('opencode/zen-free-tool-restart')['id']}")
         assert len([change for change in detail["diff"]["response"]
                     if change["reason"] == "丢弃重试前残缺的工具参数"]) == 2

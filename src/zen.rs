@@ -352,8 +352,14 @@ impl StreamFix {
                 // 重试标记出现时丢弃尚未下发的残缺片段，客户端永远只看到
                 // 完整的最后一次尝试。
                 let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
-                let fragment = call["function"]["arguments"].as_str().unwrap_or("").to_owned();
-                let entry = self.call_args.entry((choice_index, call_index)).or_default();
+                let fragment = call["function"]["arguments"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned();
+                let entry = self
+                    .call_args
+                    .entry((choice_index, call_index))
+                    .or_default();
                 if entry.flushed {
                     if !fragment.is_empty() {
                         changes.push(Change::new(path, None, None, "丢弃完整参数后的多余片段"));
