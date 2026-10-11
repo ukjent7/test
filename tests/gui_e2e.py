@@ -568,27 +568,24 @@ def run(binary, output, test):
         def verify_raw_diff(detail):
             before = bytes(detail["exchange"]["request"]["body"])
             after = bytes(detail["exchange"]["attempts"][0]["request"]["body"])
-            result = bytearray()
-            old_offset = new_offset = 0
+            removed, added = [], []
             for text in page.get_by_test_id("wire-request-1").locator(".byte-diff pre.removed, .byte-diff pre.added").all_text_contents():
                 label, payload = text.split(": ", 1)
                 direction, _, offset, _, length, _ = label.split(" ")
                 offset = int(offset)
                 block = bytes.fromhex(payload[4:]) if payload.startswith("HEX ") else json.loads(payload).encode("utf-8")
                 assert len(block) == int(length)
-                if direction == "−":
-                    assert offset >= old_offset
-                    result.extend(before[old_offset:offset])
-                    new_offset += offset - old_offset
-                    assert before[offset:offset + len(block)] == block
-                    old_offset = offset + len(block)
-                else:
-                    assert offset >= new_offset
-                    result.extend(before[old_offset:old_offset + offset - new_offset])
-                    old_offset += offset - new_offset
-                    result.extend(block)
-                    new_offset = offset + len(block)
-            result.extend(before[old_offset:])
+                source = before if direction == "−" else after
+                assert source[offset:offset + len(block)] == block, "displayed block must exist in its stream"
+                (removed if direction == "−" else added).append((offset, block))
+            for spans in (removed, added):
+                assert all(s[0] + len(s[1]) <= t[0] or (s[0] == t[0] and (not s[1] or not t[1]))
+                           for s, t in zip(spans, spans[1:])), "displayed offsets must not overlap"
+            assert len(removed) == len(added), "renderer must pair removals with additions"
+            result = bytearray(before)
+            for index in reversed(range(len(removed))):
+                start, block = removed[index]
+                result[start:start + len(block)] = added[index][1]
             assert bytes(result) == after, "displayed byte diff must reconstruct the forwarded body exactly"
 
         # No response repair and disabled forwarding must not invent changes.
