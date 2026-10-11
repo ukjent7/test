@@ -11,6 +11,9 @@ function diffLine(parent, kind, text, tinted = false) {
 const visible = value => JSON.stringify(value).replace(/[\s\u200b-\u200f\u2060-\u206f\ufeff]/gu,
   char => `\\u${char.codePointAt(0).toString(16).padStart(4, '0')}`);
 
+/* 旧记录的事件标签可能带悬挂分隔符（如 "SSE #49 · "）。 */
+const eventLabel = event => typeof event === 'string' ? event.replace(/\s*·\s*$/, '').trim() : null;
+
 function byteText(bytes) {
   try {
     return visible(new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(new Uint8Array(bytes)));
@@ -50,7 +53,7 @@ function rawSnapshot(parent, title, short, snapshot, testid) {
   parent.append(details);
 }
 
-function diffParts(left, right, deadline = performance.now() + 100, anchors = true) {
+function diffParts(left, right, deadline = performance.now() + 100, anchors = true, maxEditLength = 1000) {
   let start = 0, end = 0;
   while (start < Math.min(left.length, right.length) && left[start] === right[start]) start++;
   while (end < Math.min(left.length, right.length) - start && left.at(-end - 1) === right.at(-end - 1)) end++;
@@ -58,7 +61,7 @@ function diffParts(left, right, deadline = performance.now() + 100, anchors = tr
   let middle = [];
   if (a.length || b.length) {
     middle = performance.now() < deadline && ByteDiff.diffArrays(a, b,
-      {timeout: Math.max(0, deadline - performance.now()), maxEditLength: 1000});
+      {timeout: Math.max(0, deadline - performance.now()), maxEditLength});
     if (!middle && anchors) {
       const unique = values => {
         const positions = new Map();
@@ -187,34 +190,68 @@ function jsonDifference(before, after) {
 }
 
 function byteDifference(parent, before, after) {
-  let changes;
+  let text = null;
   try {
     const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
-    const tokens = bytes => decoder.decode(new Uint8Array(bytes)).match(/"(?:\\[\s\S]|[^"\\])*"|\s+|[^\s"{}\[\],:]+|[\s\S]/gu) || [];
-    changes = diffParts(tokens(before), tokens(after)).map(part => ({...part, value: Array.from(new TextEncoder().encode(part.value.join('')))}));
-  } catch {
-    changes = diffParts(before, after);
-  }
+    text = {before: decoder.decode(new Uint8Array(before)), after: decoder.decode(new Uint8Array(after))};
+  } catch {}
+  // 多行正文（SSE、换行分隔）按行比较：每行带换行符，逐字节可重建；单行 JSON 仍按词元比较。
+  const changes = text && (text.before.includes('\n') || text.after.includes('\n'))
+    ? diffParts(text.before.match(/[^\n]*\n|[^\n]+/g) || [], text.after.match(/[^\n]*\n|[^\n]+/g) || [],
+        performance.now() + 500, true, 1e6)
+        .map(part => ({removed: part.removed, added: part.added, lines: part.value}))
+    : text
+      ? diffParts(text.before.match(/"(?:\\[\s\S]|[^"\\])*"|\s+|[^\s"{}\[\],:]+|[\s\S]/gu) || [],
+          text.after.match(/"(?:\\[\s\S]|[^"\\])*"|\s+|[^\s"{}\[\],:]+|[\s\S]/gu) || [])
+        .map(part => ({removed: part.removed, added: part.added, tokens: part.value}))
+      : diffParts(before, after)
+        .map(part => ({removed: part.removed, added: part.added, bytes: part.value}));
+  const encoder = new TextEncoder(), byteSize = value => encoder.encode(value).length;
+  const items = change => change.lines ? change.lines.map(line => ({text: line, size: byteSize(line)}))
+    : change.tokens ? [{text: change.tokens.join(''), size: byteSize(change.tokens.join(''))}]
+    : [{bytes: change.bytes, size: change.bytes.length}];
+  const payload = item => item.bytes ? byteText(item.bytes) : visible(item.text);
   let oldOffset = 0, newOffset = 0, changed = false;
+  const row = (kind, item, offset) => diffLine(parent, kind,
+    `${kind === 'removed' ? '−' : '+'} 字节 ${offset} · ${item.size} 字节: `);
   for (let index = 0; index < changes.length; index++) {
     const change = changes[index];
-    if (change.removed || change.added) {
-      changed = true;
-      const line = diffLine(parent, change.removed ? 'removed' : 'added',
-        `${change.removed ? '−' : '+'} 字节 ${change.removed ? oldOffset : newOffset} · ${change.value.length} 字节: `);
-      const next = changes[index + 1];
-      if (change.removed && next?.added) {
-        const added = diffLine(parent, 'added', `+ 字节 ${newOffset} · ${next.value.length} 字节: `);
-        highlightPair(line, added, byteText(change.value), byteText(next.value));
-        oldOffset += change.value.length;
-        newOffset += next.value.length;
-        index++;
-        continue;
-      }
-      line.append(document.createTextNode(byteText(change.value)));
+    if (!change.removed && !change.added) {
+      for (const item of items(change)) { oldOffset += item.size; newOffset += item.size; }
+      if (change.lines) diffLine(parent, 'diff-gap', `··· ${change.lines.length} 行未变`);
+      continue;
     }
-    if (!change.added) oldOffset += change.value.length;
-    if (!change.removed) newOffset += change.value.length;
+    changed = true;
+    const next = changes[index + 1], left = items(change), right = next?.added ? items(next) : null;
+    if (change.removed && right) {
+      /* 删除与新增必须一一配对（多余侧补零长行），差异对话框的重建校验依赖配对完整。 */
+      const paired = Math.min(left.length, right.length);
+      for (let i = 0; i < paired; i++) {
+        const removed = row('removed', left[i], oldOffset);
+        oldOffset += left[i].size;
+        const added = row('added', right[i], newOffset);
+        newOffset += right[i].size;
+        highlightPair(removed, added, payload(left[i]), payload(right[i]));
+      }
+      for (const item of left.slice(paired)) {
+        row('removed', item, oldOffset).append(document.createTextNode(payload(item)));
+        oldOffset += item.size;
+        row('added', {size: 0}, newOffset).append(document.createTextNode('""'));
+      }
+      for (const item of right.slice(paired)) {
+        row('removed', {size: 0}, oldOffset).append(document.createTextNode('""'));
+        row('added', item, newOffset).append(document.createTextNode(payload(item)));
+        newOffset += item.size;
+      }
+      index++;
+      continue;
+    }
+    for (const item of left) {
+      const kind = change.removed ? 'removed' : 'added';
+      row(kind, item, change.removed ? oldOffset : newOffset).append(document.createTextNode(payload(item)));
+      if (change.removed) { oldOffset += item.size; row('added', {size: 0}, newOffset).append(document.createTextNode('""')); }
+      else { newOffset += item.size; row('removed', {size: 0}, oldOffset).append(document.createTextNode('""')); }
+    }
   }
   if (!changed) diffLine(parent, 'diff-empty', '正文逐字节相同');
 }
@@ -307,7 +344,17 @@ function renderDiff(content, diff) {
     heading.textContent = title;
     section.append(heading);
     if (!diff[direction].length) diffLine(section, 'diff-empty', '未记录主动修补；完整字节差异见下方');
-    for (const change of diff[direction]) {
+    /* 只记路径的修补（如思维链逐帧改名）按原因与路径聚合成一张可展开的卡片。 */
+    const patchless = change => !Object.hasOwn(change, 'before') && !Object.hasOwn(change, 'after');
+    const groupKey = change => `${change.reason}\n${change.path}\n${Object.hasOwn(change, 'after_path') ? change.after_path : ''}`;
+    const changes = diff[direction];
+    for (let index = 0; index < changes.length; index++) {
+      const change = changes[index];
+      let count = 1;
+      if (patchless(change)) {
+        while (index + count < changes.length && patchless(changes[index + count])
+          && groupKey(changes[index + count]) === groupKey(change)) count++;
+      }
       const item = document.createElement('div');
       item.className = 'diff-item';
       const label = document.createElement('strong');
@@ -316,23 +363,32 @@ function renderDiff(content, diff) {
       path.textContent = change.path === change.after_path || !Object.hasOwn(change, 'after')
         ? change.path : `${change.path} → ${change.after_path}`;
       item.append(label, path);
-      if (change.event) {
+      if (count > 1) item.append(element('span', 'diff-count', `共 ${count} 处 · 逐帧见下`));
+      const events = changes.slice(index, index + count).map(patched => eventLabel(patched.event));
+      if (count > 1 && events.some(Boolean)) {
+        const frames = document.createElement('details');
+        frames.className = 'diff-events';
+        frames.append(element('summary', '', `${events.find(Boolean)} – ${events.findLast(Boolean)}`));
+        for (const event of events) if (event) frames.append(element('code', '', event));
+        item.append(frames);
+      } else if (events[0]) {
         const event = document.createElement('span');
         event.className = 'diff-event';
-        event.textContent = change.event;
+        event.textContent = events[0];
         item.append(event);
       }
-      if (Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
+      if (count === 1 && Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
         for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
           const format = value => Object.hasOwn(value, key) ? visible(value[key]) : '（字段不存在）';
           diffLine(item, 'removed', `− ${key}: ${format(change.before)}`);
           diffLine(item, 'added', `+ ${key}: ${format(change.after)}`);
         }
-      } else if (Object.hasOwn(change, 'before') || Object.hasOwn(change, 'after')) {
+      } else if (count === 1 && (Object.hasOwn(change, 'before') || Object.hasOwn(change, 'after'))) {
         diffLine(item, 'removed', `− ${Object.hasOwn(change, 'before') ? visible(change.before) : '（字段不存在）'}`);
         diffLine(item, 'added', `+ ${Object.hasOwn(change, 'after') ? visible(change.after) : '（已删除）'}`);
       }
       section.append(item);
+      index += count - 1;
     }
     content.append(section);
   }

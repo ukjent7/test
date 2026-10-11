@@ -311,6 +311,11 @@ input+label { margin-top: 14px; }
 .diff-item>code, .diff-event { color: var(--muted); font-size: 10px; }
 .diff-item>code:last-of-type { padding-bottom: 9px; }
 .diff-event { padding-top: 0; padding-bottom: 9px; }
+.diff-count { display: block; padding: 9px 13px 0; color: var(--accent); font-size: 10px; }
+.diff-events summary { padding: 0 13px 9px; color: var(--muted); font-size: 10px; cursor: pointer; list-style: none; }
+.diff-events[open] summary { padding-bottom: 6px; }
+.diff-events code { display: block; padding: 0 13px 6px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.diff-events code:last-of-type { padding-bottom: 9px; }
 #diff-content pre { margin: 0; padding: 9px 13px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .removed { color: var(--red); }
 .added { color: var(--green); }
