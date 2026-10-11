@@ -198,10 +198,10 @@ pub(crate) fn normalize_sse(
 }
 
 fn label_changes(changes: &mut [Change], frame_number: usize, value: &Value) {
-    let mut event = format!(
-        "SSE #{frame_number} · {}",
-        value["type"].as_str().unwrap_or("")
-    );
+    let mut event = format!("SSE #{frame_number}");
+    if let Some(kind) = value["type"].as_str().filter(|kind| !kind.is_empty()) {
+        event.push_str(&format!(" · {kind}"));
+    }
     if let Some(index) = value["index"].as_u64() {
         event.push_str(&format!(" · index {index}"));
     }
