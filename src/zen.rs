@@ -94,8 +94,8 @@ pub fn prepare_headers(
 /// Zen 免费层的工具整形结果：改名映射与补出来的桩。
 #[derive(Default)]
 pub struct ZenTools {
-    back: BTreeMap<String, String>, // 提供给 Zen 的名字 → 客户端原名
-    stubs: BTreeSet<String>,        // 客户端没有、只为 Zen 补的名字
+    back: BTreeMap<String, String>,   // 提供给 Zen 的名字 → 客户端原名
+    stubs: BTreeSet<String>,          // 客户端没有、只为 Zen 补的名字
     schemas: BTreeMap<String, Value>, // 客户端原名 → 参数 schema
 }
 
@@ -266,10 +266,7 @@ impl StreamFix {
                 chunk[start..].to_owned()
             }
         };
-        loop {
-            let Some(end) = buffer.find("</tool_call>") else {
-                break;
-            };
+        while let Some(end) = buffer.find("</tool_call>") {
             if let Some(call) = parse_markup_call(&buffer[..end]) {
                 calls.push(call);
             }
@@ -652,10 +649,7 @@ fn parse_markup_call(region: &str) -> Option<(String, Vec<(String, String)>)> {
     let name = rest[..end].trim().to_owned();
     let mut rest = &rest[end + 1..];
     let mut params = Vec::new();
-    loop {
-        let Some(item) = rest.strip_prefix("<parameter=") else {
-            break;
-        };
+    while let Some(item) = rest.strip_prefix("<parameter=") {
         let Some(end) = item.find('>') else {
             break;
         };
