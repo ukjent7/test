@@ -79,6 +79,8 @@
     "free-messages-collapse-anthropic-wire",
     "free-stub-call-dropped-and-stop-reclassified",
     "free-tool-renamed-roundtrip",
+    "free-tool-args-restart-drops-aborted-fragments",
+    "free-tool-args-truncated-sent-with-finish",
     "free-reasoning-alias-renamed-to-reasoning-content",
     "free-tools-reasoning-usage-and-multiple-choices",
     "free-responses-terminal-json",

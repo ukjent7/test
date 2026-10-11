@@ -347,6 +347,32 @@ impl StreamFix {
                     }
                     self.calls_made = true;
                 }
+                // 免费模型会在同一序号上重试参数：每轮重试以空参数帧开头，
+                // 中途放弃。只有累积成完整 JSON 才把真实参数发给客户端，
+                // 重试标记出现时丢弃尚未下发的残缺片段，客户端永远只看到
+                // 完整的最后一次尝试。
+                let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
+                let fragment = call["function"]["arguments"].as_str().unwrap_or("").to_owned();
+                let entry = self.call_args.entry((choice_index, call_index)).or_default();
+                if entry.flushed {
+                    if !fragment.is_empty() {
+                        changes.push(Change::new(path, None, None, "丢弃完整参数后的多余片段"));
+                        continue;
+                    }
+                } else if fragment.is_empty() {
+                    if !entry.text.is_empty() {
+                        changes.push(Change::new(path, None, None, "丢弃重试前残缺的工具参数"));
+                        entry.text.clear();
+                    }
+                } else {
+                    entry.text.push_str(&fragment);
+                    if serde_json::from_str::<Value>(&entry.text).is_ok() {
+                        entry.flushed = true;
+                        call["function"]["arguments"] = json!(entry.text.clone());
+                    } else {
+                        call["function"]["arguments"] = json!("");
+                    }
+                }
                 if *dropped > 0 {
                     call["index"] = json!(call_index - *dropped);
                 }
@@ -371,6 +397,40 @@ impl StreamFix {
                     Some(json!("stop")),
                     "无真实工具调用，改判普通结束",
                 ));
+            }
+        }
+        // 流结束时仍有未完整的参数：补发最后一次尝试的片段，让客户端
+        // 看到明确的残缺参数而不是空参数。
+        for choice in choices.iter_mut() {
+            if choice["finish_reason"].is_null() {
+                continue;
+            }
+            let choice_index = choice["index"].as_u64().unwrap_or(0);
+            let dropped = self.dropped_calls.get(&choice_index).copied().unwrap_or(0);
+            let mut extra = Vec::new();
+            for ((call_choice, call_index), entry) in self.call_args.iter_mut() {
+                if *call_choice != choice_index || entry.flushed || entry.text.is_empty() {
+                    continue;
+                }
+                entry.flushed = true;
+                extra.push(json!({"index": *call_index - dropped,
+                    "function": {"arguments": entry.text.clone()}}));
+                changes.push(Change::new(
+                    format!("/choices/{choice_index}/delta/tool_calls"),
+                    None,
+                    None,
+                    "流结束时补发未完成的工具参数",
+                ));
+            }
+            if let Some(delta) = choice.get_mut("delta").and_then(Value::as_object_mut)
+                && !extra.is_empty()
+            {
+                match delta.get_mut("tool_calls") {
+                    Some(Value::Array(items)) => items.extend(extra),
+                    _ => {
+                        delta.insert("tool_calls".into(), Value::Array(extra));
+                    }
+                }
             }
         }
         // 桩调用被剔除后可能整个帧只剩空壳；usage 单独成帧时不能丢。
@@ -662,7 +722,15 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
     (changes, tools)
 }
 
-/// 免费层流式的逐帧修复状态：桩块的索引、桩调用的序号、真实调用计数。
+/// 同一序号工具参数的缓冲：累积片段、是否已把完整参数发给客户端。
+#[derive(Default)]
+struct CallArgs {
+    text: String,
+    flushed: bool,
+}
+
+/// 免费层流式的逐帧修复状态：桩块的索引、桩调用的序号、真实调用计数、
+/// 未下发的工具参数。
 pub struct StreamFix {
     tools: ZenTools,
     stub_blocks: BTreeSet<u64>,
@@ -672,6 +740,7 @@ pub struct StreamFix {
     calls_made: bool,
     stub_ids: BTreeSet<String>,
     dropped_items: u64,
+    call_args: BTreeMap<(u64, u64), CallArgs>,
 }
 
 impl StreamFix {
@@ -685,6 +754,7 @@ impl StreamFix {
             calls_made: false,
             stub_ids: BTreeSet::new(),
             dropped_items: 0,
+            call_args: BTreeMap::new(),
         }
     }
 }

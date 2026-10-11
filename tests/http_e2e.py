@@ -165,6 +165,26 @@ def run(binary, checker, output, test):
                     wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
                 elif case == "zen-free-invalid":
                     wire = b"data: invalid\n\ndata: [DONE]\n\n"
+                elif case in ("zen-free-tool-restart", "zen-free-tool-truncated"):
+                    # 复现免费模型在同一序号上重试工具参数的真实形态：
+                    # 每轮重试以空参数帧开头，中途放弃后从头再来。
+                    def call_fragment(args):
+                        return {"choices": [{"index": 0, "delta": {"tool_calls": [
+                            {"index": 0, "function": {"arguments": args}}]}}]}
+                    if case == "zen-free-tool-restart":
+                        chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
+                                     "tool_calls": [{"index": 0, "id": "call_restart", "type": "function",
+                                         "function": {"name": "read_file", "arguments": ""}}]}}]},
+                            call_fragment(""), call_fragment('{"path": '), call_fragment(""),
+                            call_fragment('{"path": '), call_fragment(""),
+                            call_fragment('"README'), call_fragment('.md"}'),
+                            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
+                    else:
+                        chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
+                                     "tool_calls": [{"index": 0, "id": "call_cut", "type": "function",
+                                         "function": {"name": "read_file", "arguments": '{"path": "un'}}]}}]},
+                            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}]
+                    wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
                 elif case == "zen-free-missing-done":
                     wire = ZEN_WIRE.replace(b"data: [DONE]\r\n\r\n", b"").replace(b"data: [DONE]\n\n", b"")
                 self.send_response(200)
@@ -787,12 +807,36 @@ def run(binary, checker, output, test):
         assert status == 200
         events = decode_sse(wire)
         assert [event["choices"][0]["delta"]["tool_calls"][0]["function"] for event in events[:2]] == [
-            {"name": "Bash", "arguments": '{"command":'}, {"arguments": '"ls"}'}]
+            {"name": "Bash", "arguments": ""}, {"arguments": '{"command":"ls"}'}]
         assert events[2]["choices"][0]["finish_reason"] == "tool_calls"
         assert len(seen) == 2
         tools = seen[1]["body"]["tools"]
         assert tools[0]["function"]["name"] == "bash" and tools[1]["function"]["name"] == "read"
         passed("free-tool-renamed-roundtrip")
+        status, _, wire, _ = free_post("zen-free-tool-restart", streaming=True)
+        assert status == 200
+        events = decode_sse(wire)
+        args = [event["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"]
+                for event in events[:8]]
+        # 中途重试的残缺片段永不外发，客户端按序聚合得到完整的最后一次尝试。
+        assert args == ["", "", "", "", "", "", "", '{"path": "README.md"}'], args
+        assert events[8]["choices"][0]["finish_reason"] == "tool_calls"
+        _, detail = get(f"/ui/calls/{latest_call('opencode/zen-free-tool-restart')['id']}")
+        assert len([change for change in detail["diff"]["response"]
+                    if change["reason"] == "丢弃重试前残缺的工具参数"]) == 2
+        (output / "zen-free-tool-restart.sse").write_text(wire.decode(), encoding="utf-8")
+        passed("free-tool-args-restart-drops-aborted-fragments")
+        status, _, wire, _ = free_post("zen-free-tool-truncated", streaming=True)
+        assert status == 200
+        events = decode_sse(wire)
+        # 流结束时仍未完整的参数随结束帧补发，客户端拿到的是残缺片段
+        # 而不是空参数。
+        assert events[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == ""
+        injected = events[1]["choices"][0]["delta"]["tool_calls"][0]
+        assert injected["function"]["arguments"] == '{"path": "un'
+        assert events[1]["choices"][0]["finish_reason"] == "tool_calls"
+        (output / "zen-free-tool-truncated.sse").write_text(wire.decode(), encoding="utf-8")
+        passed("free-tool-args-truncated-sent-with-finish")
         status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
         assert status == 200
         events = decode_sse(wire)
