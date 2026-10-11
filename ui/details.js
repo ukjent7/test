@@ -328,9 +328,9 @@ function renderDiff(content, diff) {
           diffLine(item, 'removed', `− ${key}: ${format(change.before)}`);
           diffLine(item, 'added', `+ ${key}: ${format(change.after)}`);
         }
-      } else {
-        diffLine(item, 'removed', `− ${visible(change.before)}`);
-        diffLine(item, 'added', '+ （已删除）');
+      } else if (Object.hasOwn(change, 'before') || Object.hasOwn(change, 'after')) {
+        diffLine(item, 'removed', `− ${Object.hasOwn(change, 'before') ? visible(change.before) : '（字段不存在）'}`);
+        diffLine(item, 'added', `+ ${Object.hasOwn(change, 'after') ? visible(change.after) : '（已删除）'}`);
       }
       section.append(item);
     }

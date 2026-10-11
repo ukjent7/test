@@ -6,6 +6,7 @@ Frontend refactor failure scenarios, specified before implementation:
 - Byte-diff timeout paints entire bodies instead of retaining neutral raw snapshots.
 - Missing/null/type/array changes must remain distinct; JSON whitespace stays inspectable.
 - A line diff must show line numbers, nearby context and the changed word, not full bodies.
+- Path-only changes without before/after payloads (reasoning renames) must render, not crash.
 - Raw JSON token diff must finish on reordered large bodies; budget exhaustion still shows a diff.
 - Primary connection/model/provider controls fall below the first desktop viewport.
 - Editing one provider exposes unrelated fields or Cancel loses the initiating focus.
@@ -69,6 +70,23 @@ def run(binary, output, test):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["content-length"])))
             upstream_calls.append({"path": self.path, "body": body})
+            if "/zen/v1/chat/completions" in self.path:
+                chunks = [
+                    {"object": "chat.completion.chunk", "choices": [{"index": 0,
+                        "delta": {"role": "assistant", "reasoning": "GUI_RESPONSE_REASONING"}, "finish_reason": None}]},
+                    {"object": "chat.completion.chunk", "choices": [{"index": 0,
+                        "delta": {"content": "已连接"}, "finish_reason": None}]},
+                    {"object": "chat.completion.chunk", "choices": [{"index": 0,
+                        "delta": {}, "finish_reason": "stop"}]},
+                ]
+                wire = b"".join(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode() for chunk in chunks)
+                wire += b"data: [DONE]\n\n"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+                return
             message = {"id": "gui-e2e", "type": "message", "role": "assistant",
                        "model": body["model"], "stop_reason": "end_turn",
                        "content": [{"type": "thinking", "thinking": "fixture reasoning"},
@@ -676,6 +694,27 @@ def run(binary, output, test):
               ensure_ascii=False, indent=2), encoding="utf-8")
         page.keyboard.press("Escape")
         passed("diff-sse-event-index-and-theme")
+
+        # 只记路径不搬正文的修补（如 Zen 免费层思维链改名）没有 before/after
+        # 载荷：对话框必须照常渲染，且正文不出现在差异里。
+        chat_body = {"model": "opencode/mimo-v2.5-free", "max_tokens": 64, "stream": True,
+                     "messages": [{"role": "user", "content": "PRIVATE_CHAT_MESSAGE"}]}
+        response = context.request.post(address + "/v1/chat/completions", data=chat_body)
+        assert response.status == 200
+        assert "/zen/v1/chat/completions" in upstream_calls[-1]["path"]
+        assert decode_sse(response.body())[-1]["choices"][0]["finish_reason"] == "stop"
+        detail = latest_detail()
+        changes = detail["diff"]["response"]
+        assert changes, "free-tier reasoning rename must be recorded"
+        assert all("before" not in change and "after" not in change for change in changes), \
+            "reasoning renames must stay path-only"
+        assert all(change["path"] == "/choices/0/delta/reasoning" for change in changes)
+        assert "GUI_RESPONSE_REASONING" not in json.dumps(detail["diff"])
+        open_diff(detail)
+        expect(page.get_by_test_id("diff-response")).to_contain_text("思维链字段回改为 reasoning_content")
+        page.keyboard.press("Escape")
+        (output / "diff-path-only.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
+        passed("diff-path-only-changes-render-without-payload")
 
         raw_request = '{ \t"model" : "history-gui-whitespace", "stream": false, "messages": [] }\r\n'
         response = context.request.post(address + "/v1/messages", data=raw_request,
