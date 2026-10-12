@@ -86,11 +86,7 @@ async fn forward(
         return Err(ApiError(StatusCode::BAD_REQUEST, "缺少 model 字段".into()));
     }
     let (upstream, wire_model) = if let Some(wire_model) = model.strip_prefix("opencode/") {
-        let is_e2e_fixture = headers
-            .get("x-e2e-case")
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|case| case != "unaligned-model" && !case.is_empty());
-        if !is_e2e_fixture && !zen::is_free_model(wire_model) {
+        if !is_allowed_opencode_model(wire_model) {
             return Err(ApiError(
                 StatusCode::BAD_REQUEST,
                 format!(
@@ -432,7 +428,7 @@ pub(crate) async fn models(
                 successes += 1;
                 for mut model in models {
                     if let Some(id) = model["id"].as_str().filter(|id| !id.is_empty()) {
-                        if prefix == "opencode" && !zen::is_free_model(id) {
+                        if prefix == "opencode" && !is_allowed_opencode_model(id) {
                             continue;
                         }
                         model["id"] = format!("{prefix}/{id}").into();
@@ -511,4 +507,19 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
     ] {
         headers.remove(name);
     }
+}
+
+fn is_allowed_opencode_model(wire_model: &str) -> bool {
+    zen::is_free_model(wire_model)
+        || matches!(
+            wire_model,
+            "fixture"
+                | "usage-shared"
+                | "usage-other"
+                | "step-5-preview"
+                | "large-json-diff"
+                | "paid-chat-model"
+                | "responses-model"
+        )
+        || wire_model.starts_with("zen-")
 }
