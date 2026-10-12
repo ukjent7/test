@@ -5,6 +5,7 @@ from collections import Counter
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -88,7 +89,7 @@ def expected_cases(suite, platform_name):
     return contract[suite] + contract.get(f"{suite}_{platform_name}", [])
 
 
-def check_report(report, suite, digest, platform_name, commit=None):
+def check_report(report, suite, digest, platform_name, commit=None, case_filter=None):
     if report["suite"] != suite or report["status"] != "passed":
         raise ValueError(f"{suite}: suite did not pass")
     if report["gateway_sha256"] != digest or report["platform"] != platform_name:
@@ -96,7 +97,8 @@ def check_report(report, suite, digest, platform_name, commit=None):
     if commit is not None and report["commit"] != commit:
         raise ValueError(f"{suite}: commit mismatch")
     names = [case["name"] for case in report["cases"] if case["status"] == "passed"]
-    if len(names) != len(report["cases"]) or Counter(names) != Counter(expected_cases(suite, platform_name)):
+    expected = [case_filter] if case_filter else expected_cases(suite, platform_name)
+    if len(names) != len(report["cases"]) or Counter(names) != Counter(expected):
         raise ValueError(f"{suite}: missing, duplicate, or unexpected cases")
 
 
@@ -175,11 +177,12 @@ def wait_ready(process, port, timeout=30):
 
 
 class E2E:
-    def __init__(self, suite, binary, output, checker=None):
+    def __init__(self, suite, binary, output, checker=None, case_filter=None):
         output.mkdir(parents=True, exist_ok=True)
         if any(output.iterdir()):
             raise ValueError("E2E output directory must be empty")
         self.output = output
+        self.case_filter = case_filter
         self.excluded = {binary.name, checker.name} if checker else {binary.name}
         self.resources = ExitStack()
         self.started = time.monotonic()
@@ -215,6 +218,16 @@ class E2E:
         self.report["cases"].append({"name": name, "status": "passed", "elapsed_seconds": round(time.monotonic() - self.started, 3)})
         write_json(self.output / "report.json", self.report)
 
+    def should_run(self, name):
+        return self.case_filter is None or self.case_filter == name
+
+    def run_case(self, name, action, *args, **kwargs):
+        if not self.should_run(name):
+            return None
+        result = action(*args, **kwargs)
+        self.passed(name)
+        return result
+
     def server(self, server):
         def stop():
             server.shutdown()
@@ -234,10 +247,70 @@ class E2E:
         return process
 
 
+class GatewayProcess:
+    """Manage gateway lifecycle, ports, configuration, and HTTP communication."""
+
+    def __init__(self, test, binary, output, *, port=None, env=None,
+                 settings=None, log_name="gateway.log", wait_timeout=30):
+        self.test = test
+        self.port = port or free_port()
+        self.output = Path(output).resolve()
+        self.database = self.output / "requests.sqlite3"
+        self.config = self.output / "settings.json"
+        self.database.unlink(missing_ok=True)
+
+        if settings is not None:
+            self.config.write_text(json.dumps(settings), encoding="utf-8")
+        elif not self.config.exists():
+            self.config.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+
+        default_env = {
+            "GATEWAY_CONFIG": str(self.config),
+            "GATEWAY_DB": str(self.database),
+            "GATEWAY_LISTEN": f"127.0.0.1:{self.port}",
+        }
+        if env:
+            default_env.update(env)
+        self.env = {**os.environ, **default_env}
+
+        log = test.log(log_name)
+        self.process = test.spawn([str(binary), "--headless"], env=self.env, stdout=log, stderr=log)
+        wait_ready(self.process, self.port, timeout=wait_timeout)
+
+    def request(self, method, path, body=None, headers=None, timeout=10):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        try:
+            connection.request(method, path, body, headers or {})
+            response = connection.getresponse()
+            response_headers = {k.lower(): v for k, v in response.getheaders()}
+            wire = response.read()
+            return response.status, response_headers, wire
+        finally:
+            connection.close()
+
+    def post(self, path, payload, headers=None, timeout=10):
+        body = json.dumps(payload, ensure_ascii=False).encode() if isinstance(payload, (dict, list)) else payload
+        req_headers = {"Content-Type": "application/json", **(headers or {})}
+        return self.request("POST", path, body, req_headers, timeout=timeout)
+
+    def get(self, path, headers=None, timeout=10):
+        return self.request("GET", path, None, headers or {}, timeout=timeout)
+
+    def get_json(self, path, headers=None, timeout=10):
+        status, resp_headers, wire = self.get(path, headers, timeout=timeout)
+        return status, json.loads(wire.decode("utf-8")) if wire else None, resp_headers
+
+    def update_settings(self, settings):
+        status, _, wire = self.post("/ui/settings", settings)
+        if status != 204:
+            raise RuntimeError(f"settings update failed: {status} {wire.decode('utf-8', errors='replace')}")
+
+
 def suite_cli(name, run, *, checker=False, extra_arguments=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--gateway", type=Path, required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--case", type=str, default=None, help="Run only the specified test case")
     if checker:
         parser.add_argument("--checker", type=Path, required=True)
     for option, settings in (extra_arguments or {}).items():
@@ -245,12 +318,13 @@ def suite_cli(name, run, *, checker=False, extra_arguments=None):
     args = vars(parser.parse_args())
     binary = args.pop("gateway").resolve()
     decoder = args.pop("checker").resolve() if checker else None
+    case_filter = args.pop("case", None)
     output = args.pop("output")
     if output is None:
         directory = Path("artifacts/e2e")
         directory.mkdir(parents=True, exist_ok=True)
         output = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=directory))
-    with E2E(name, binary, output, decoder) as test:
+    with E2E(name, binary, output, decoder, case_filter=case_filter) as test:
         positional = (binary, decoder, output, test) if checker else (binary, output, test)
         run(*positional, **args)
     print(f"{name} E2E passed: {len(test.report['cases'])} cases; evidence: {output}")

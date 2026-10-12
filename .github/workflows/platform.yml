@@ -46,7 +46,7 @@ jobs:
         run: |
           printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev
+          sudo apt-get install --no-install-recommends -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -111,7 +111,7 @@ jobs:
         run: |
           printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libgtk-3-0t64 libwebkit2gtk-4.1-0 libxdo3
+          sudo apt-get install --no-install-recommends -y libgtk-3-0t64 libwebkit2gtk-4.1-0
           chmod +x binaries/messages-gateway binaries/grok-wire-check
       - name: Install GUI E2E driver
         if: matrix.group == 'gui'

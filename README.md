@@ -78,7 +78,7 @@ api_backend = "chat_completions"
 
 CI 使用 `--locked`，执行格式与脚本语法检查、Clippy、Windows/Linux 构建。每个平台只构建一次，无界面 E2E（HTTP、历史、代理及流水线故障验证）与 GUI E2E 独立运行；Windows 驱动原生 WebView2，Linux 检查原生窗口并用 Chromium 验证界面。测试使用本地夹具，无需个人 API key。
 
-`tests/common.py` 统一测试生命周期；`tests/cases.json` 固定完整覆盖清单。`tests/run_e2e.py` 运行整个分组，单套失败仍继续其它套件，超时清理进程树。Actions 的 `build-*` 产物保留构建来源与二进制，`e2e-<平台>-<分组>` 保留请求/响应、数据库、截图、trace、日志、逐套报告、SHA-256 清单与 JUnit；失败时也上传已有证据。
+`tests/common.py` 统一测试生命周期；`tests/cases.json` 固定完整覆盖清单。`tests/run_e2e.py` 运行整个分组（亦支持 `--suite` 与 `--case` 单套/单用例调试），单套失败仍继续其它套件，超时清理进程树。Actions 的 `build-*` 产物保留构建来源与二进制，`e2e-<平台>-<分组>` 保留请求/响应、数据库、截图、trace、日志、逐套报告、SHA-256 清单与 JUnit；失败时也上传已有证据。
 
 在 CI 使用已构建的程序重复运行与核验（输出目录须为空；Linux GUI 需通过 `dbus-run-session -- xvfb-run -a` 启动）：
 

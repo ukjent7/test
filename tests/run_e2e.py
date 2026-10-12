@@ -33,9 +33,10 @@ def run(args):
         raise ValueError("E2E output directory must be empty")
     binary = args.gateway.resolve()
     checker = args.checker.resolve() if args.checker else None
-    if args.group == "headless" and not checker:
+    group = args.group or ("gui" if args.suite == "gui" else "headless")
+    if group == "headless" and not checker and (not args.suite or args.suite in ("http", "pipeline")):
         raise ValueError("headless E2E requires --checker")
-    summary = {"schema_version": 1, "group": args.group, "platform": PLATFORM,
+    summary = {"schema_version": 1, "group": group, "platform": PLATFORM,
                "commit": os.environ.get("GITHUB_SHA"), "gateway_sha256": sha256(binary), "suites": []}
     reports = []
 
@@ -50,6 +51,8 @@ def run(args):
         def execute(suite):
             work = workspace / suite
             command = [sys.executable, str(ROOT / SUITES[suite]), "--gateway", str(binary), "--output", str(work)]
+            if args.case:
+                command.extend(["--case", args.case])
             if suite in ("http", "pipeline"):
                 command.extend(["--checker", str(checker)])
             if suite == "pipeline":
@@ -75,7 +78,7 @@ def run(args):
                 report.update(status="failed", error=report.get("error", "suite timed out" if timed_out else f"suite exited {exit_code}"))
             else:
                 try:
-                    check_report(report, suite, summary["gateway_sha256"], PLATFORM, summary["commit"])
+                    check_report(report, suite, summary["gateway_sha256"], PLATFORM, summary["commit"], case_filter=args.case)
                 except (ValueError, KeyError) as error:
                     report.update(status="failed", error=str(error))
                     exit_code = 1
@@ -96,7 +99,8 @@ def run(args):
             if report["status"] != "passed":
                 print(log.read_text(encoding="utf-8", errors="replace"), flush=True)
 
-        for suite in GROUPS[args.group]:
+        suites_to_run = [args.suite] if args.suite else GROUPS[group]
+        for suite in suites_to_run:
             execute(suite)
         if args.check_pipeline and all(report["status"] == "passed" for report in reports):
             execute("pipeline")
@@ -107,11 +111,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway", type=Path, required=True)
     parser.add_argument("--checker", type=Path)
-    parser.add_argument("--group", choices=GROUPS, required=True)
+    parser.add_argument("--group", choices=GROUPS)
+    parser.add_argument("--suite", choices=list(SUITES.keys()), help="Run only a specific suite")
+    parser.add_argument("--case", type=str, help="Filter to a specific test case")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--suite-timeout", type=float, default=300)
     parser.add_argument("--check-pipeline", action="store_true")
     args = parser.parse_args()
-    if args.suite_timeout <= 0 or (args.check_pipeline and args.group != "headless"):
+    if not args.group and not args.suite:
+        parser.error("either --group or --suite must be specified")
+    effective_group = args.group or ("gui" if args.suite == "gui" else "headless")
+    if args.suite_timeout <= 0 or (args.check_pipeline and effective_group != "headless"):
         parser.error("timeout must be positive; pipeline checks require the headless group")
     sys.exit(run(args))
