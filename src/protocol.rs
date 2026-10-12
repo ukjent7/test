@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use crate::{app::Change, cache, zen};
@@ -20,55 +22,62 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
     };
     let mut i = 0;
     while i < messages.len() {
-        if messages[i]["role"] == "assistant"
-            && let Some(tool_calls) = messages[i]["tool_calls"].as_array()
-            && !tool_calls.is_empty()
-        {
-            let mut order_map = std::collections::HashMap::new();
-            for (idx, tc) in tool_calls.iter().enumerate() {
-                if let Some(id) = tc["id"].as_str() {
-                    let name = tc["function"]["name"].as_str().unwrap_or("").to_owned();
-                    order_map.insert(id.to_owned(), (idx, name));
-                }
-            }
-            let start = i + 1;
-            let mut end = start;
-            while end < messages.len() && messages[end]["role"] == "tool" {
-                end += 1;
-            }
-            if end > start {
-                let original_slice = messages[start..end].to_vec();
-                let mut sorted_slice = original_slice.clone();
-                sorted_slice.sort_by_key(|msg| {
-                    msg["tool_call_id"]
-                        .as_str()
-                        .and_then(|id| order_map.get(id))
-                        .map(|(idx, _)| *idx)
-                        .unwrap_or(usize::MAX)
-                });
-                for msg in sorted_slice.iter_mut() {
-                    if let Some(id) = msg["tool_call_id"].as_str()
-                        && let Some((_, name)) = order_map.get(id)
-                        && !name.is_empty()
-                        && msg["name"].as_str().is_none_or(str::is_empty)
-                    {
-                        msg["name"] = json!(name);
-                    }
-                }
-                if sorted_slice != original_slice {
-                    changes.push(Change::new(
-                        format!("/messages/{start}..{end}"),
-                        Some(json!(original_slice)),
-                        Some(json!(sorted_slice.clone())),
-                        "对齐并发工具响应顺序与工具名",
-                    ));
-                    messages[start..end].clone_from_slice(&sorted_slice);
-                }
-            }
-            i = end;
-        } else {
+        if messages[i]["role"] != "assistant" {
             i += 1;
+            continue;
         }
+        let Some(tool_calls) = messages[i]["tool_calls"].as_array() else {
+            i += 1;
+            continue;
+        };
+        if tool_calls.is_empty() {
+            i += 1;
+            continue;
+        }
+        let mut order_map = HashMap::new();
+        for (idx, tc) in tool_calls.iter().enumerate() {
+            if let Some(id) = tc["id"].as_str() {
+                let name = tc["function"]["name"].as_str().unwrap_or("").to_owned();
+                order_map.insert(id.to_owned(), (idx, name));
+            }
+        }
+        let start = i + 1;
+        let mut end = start;
+        while end < messages.len() && messages[end]["role"] == "tool" {
+            end += 1;
+        }
+        if end > start {
+            let original_slice = messages[start..end].to_vec();
+            let mut sorted_slice = original_slice.clone();
+            sorted_slice.sort_by_key(|msg| {
+                msg["tool_call_id"]
+                    .as_str()
+                    .and_then(|id| order_map.get(id))
+                    .map(|(idx, _)| *idx)
+                    .unwrap_or(usize::MAX)
+            });
+            for msg in sorted_slice.iter_mut() {
+                let Some(id) = msg["tool_call_id"].as_str() else {
+                    continue;
+                };
+                let Some((_, name)) = order_map.get(id) else {
+                    continue;
+                };
+                if !name.is_empty() && msg["name"].as_str().is_none_or(str::is_empty) {
+                    msg["name"] = json!(name);
+                }
+            }
+            if sorted_slice != original_slice {
+                changes.push(Change::new(
+                    format!("/messages/{start}..{end}"),
+                    Some(json!(original_slice)),
+                    Some(json!(sorted_slice.clone())),
+                    "对齐并发工具响应顺序与工具名",
+                ));
+                messages[start..end].clone_from_slice(&sorted_slice);
+            }
+        }
+        i = end;
     }
     changes
 }
