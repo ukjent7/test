@@ -250,41 +250,44 @@ impl StreamFix {
         })
     }
 
-    /// 被动扫描 content 里的 <tool_call> 文本标记：不改写 content，
-    /// 只在标记段完整时解析出调用（名字与参数原文）。
-    fn scan_markup(&mut self, chunk: &str) -> Vec<(String, Vec<(String, String)>)> {
+    /// 扫描并剔除 content 里的 <tool_call> 文本标记：标记段完整时解析出调用，
+    /// 正文只保留标记外的普通文本，避免标记泄露给客户端污染历史。
+    fn scan_markup(&mut self, chunk: &str) -> (String, Vec<(String, Vec<(String, String)>)>) {
         let mut calls = Vec::new();
-        let mut buffer = match self.markup.take() {
-            Some(mut buffer) => {
-                buffer.push_str(chunk);
-                buffer
-            }
-            None => {
-                let Some(start) = chunk.find("<tool_call>") else {
-                    return calls;
-                };
-                chunk[start..].to_owned()
-            }
-        };
-        while let Some(end) = buffer.find("</tool_call>") {
-            if let Some(call) = parse_markup_call(&buffer[..end]) {
-                calls.push(call);
-            }
-            buffer.drain(..end + "</tool_call>".len());
-            match buffer.find("<tool_call>") {
-                Some(start) => {
-                    buffer.drain(..start);
-                }
-                None => {
-                    buffer.clear();
+        let mut clean = String::new();
+        let mut text = chunk;
+        loop {
+            if let Some(mut buffer) = self.markup.take() {
+                buffer.push_str(text);
+                if let Some(end) = buffer.find("</tool_call>") {
+                    if let Some(call) = parse_markup_call(&buffer[..end]) {
+                        calls.push(call);
+                    }
+                    let after = buffer[end + "</tool_call>".len()..].to_owned();
+                    text = "";
+                    if let Some(start) = after.find("<tool_call>") {
+                        clean.push_str(&after[..start]);
+                        self.markup = Some(after[start..].to_owned());
+                        continue;
+                    } else {
+                        clean.push_str(&after);
+                        break;
+                    }
+                } else {
+                    self.markup = Some(buffer);
                     break;
                 }
+            } else if let Some(start) = text.find("<tool_call>") {
+                clean.push_str(&text[..start]);
+                self.markup = Some(text[start..].to_owned());
+                text = "";
+                continue;
+            } else {
+                clean.push_str(text);
+                break;
             }
         }
-        if !buffer.is_empty() {
-            self.markup = Some(buffer);
-        }
-        calls
+        (clean, calls)
     }
 
     fn messages_frame(&mut self, value: &mut Value) -> (bool, Vec<Change>) {
@@ -371,9 +374,28 @@ impl StreamFix {
             rename_reasoning(delta, choice_index, &mut changes);
             // 模型常把完整调用以 <tool_call> 文本混在 content 里，而上游
             // 转出的原生参数流残缺、串台。文本标记才是可靠来源：解析出
-            // 完整调用后按名字补到未完成的序号上，否则追加新序号。
+            // 完整调用后按名字补到未完成的序号上，否则追加新序号；正文中的
+            // 标记一并剔除，避免污染会话历史。
             let content = delta.get("content").and_then(Value::as_str).unwrap_or("");
-            let markup_calls = self.scan_markup(content);
+            let (clean_content, markup_calls) = self.scan_markup(content);
+            if let Some(delta_content) = delta.get_mut("content") {
+                if clean_content != content {
+                    let path = format!("/choices/{choice_index}/delta/content");
+                    let before = delta_content.clone();
+                    if clean_content.is_empty() {
+                        delta.as_object_mut().and_then(|obj| obj.remove("content"));
+                        changes.push(Change::new(path, Some(before), None, "从正文剔除文本工具标记"));
+                    } else {
+                        *delta_content = json!(clean_content);
+                        changes.push(Change::new(
+                            path,
+                            Some(before),
+                            Some(json!(clean_content)),
+                            "从正文剔除文本工具标记",
+                        ));
+                    }
+                }
+            }
             let dropped = self.dropped_calls.entry(choice_index).or_default();
             let mut kept = Vec::new();
             if let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
@@ -667,28 +689,44 @@ fn parse_markup_call(region: &str) -> Option<(String, Vec<(String, String)>)> {
     Some((name, params))
 }
 
+fn prop_has_type(prop: &Value, expected: &str) -> bool {
+    if prop["type"].as_str() == Some(expected) {
+        return true;
+    }
+    if let Some(types) = prop["type"].as_array() {
+        return types.iter().any(|item| item.as_str() == Some(expected));
+    }
+    if let Some(union) = prop["anyOf"].as_array().or_else(|| prop["oneOf"].as_array()) {
+        return union.iter().any(|item| prop_has_type(item, expected));
+    }
+    false
+}
+
 /// 按工具 schema 把文本参数值转成声明类型，避免客户端把布尔或数字
-/// 当字符串拒绝反序列化。
+/// 当字符串拒绝反序列化。支持联合与可空声明（如 `["integer", "null"]`）。
 fn typed_value(schema: &Value, key: &str, raw: &str) -> Value {
-    let kind = schema["properties"][key]["type"].as_str().unwrap_or("");
-    match kind {
-        "boolean" => match raw.trim() {
+    let prop = &schema["properties"][key];
+    let trimmed = raw.trim();
+    if prop_has_type(prop, "boolean") {
+        match trimmed {
             "true" => json!(true),
             "false" => json!(false),
             _ => json!(raw),
-        },
-        "integer" => raw
-            .trim()
+        }
+    } else if prop_has_type(prop, "integer") {
+        trimmed
             .parse::<i64>()
             .map(|value| json!(value))
-            .unwrap_or_else(|_| json!(raw)),
-        "number" => raw
-            .trim()
+            .unwrap_or_else(|_| json!(raw))
+    } else if prop_has_type(prop, "number") {
+        trimmed
             .parse::<f64>()
             .map(|value| json!(value))
-            .unwrap_or_else(|_| json!(raw)),
-        "array" | "object" => serde_json::from_str(raw).unwrap_or_else(|_| json!(raw)),
-        _ => json!(raw),
+            .unwrap_or_else(|_| json!(raw))
+    } else if prop_has_type(prop, "array") || prop_has_type(prop, "object") {
+        serde_json::from_str(raw).unwrap_or_else(|_| json!(raw))
+    } else {
+        json!(raw)
     }
 }
 

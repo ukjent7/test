@@ -184,6 +184,7 @@ def run(binary, checker, output, test):
                         call_fragment('{"target_directory": "/home/kk/.grok"}', index=1),
                         {"choices": [{"index": 0, "delta": {"content":
                             '<tool_call><function=hashline_grep><parameter=-i>true</parameter>'
+                            '<parameter=limit>20</parameter>'
                             '<parameter=glob>*.{json,toml}</parameter>'
                             '<parameter=pattern>model|grok</parameter>'
                             '</function></tool_call>'}}]},
@@ -872,23 +873,26 @@ def run(binary, checker, output, test):
             {"type": "function", "function": {"name": "hashline_grep",
              "parameters": {"type": "object", "required": ["pattern"],
                             "properties": {"-i": {"type": "boolean"}, "glob": {"type": "string"},
+                                           "limit": {"type": ["integer", "null"]},
                                            "pattern": {"type": "string"}}}}}])
         assert status == 200
         events = decode_sse(wire)
         calls = {}
         for event in events:
             delta = event["choices"][0].get("delta") or {}
+            assert "<tool_call" not in (delta.get("content") or "")
             for call in delta.get("tool_calls") or []:
                 calls[call["index"]] = calls.get(call["index"], "") + (call["function"].get("arguments") or "")
-        # 原生流串台的参数被扣住，客户端拿到的是文本标记重建的完整参数。
+        # 原生流串台的参数被扣住，客户端拿到的是文本标记重建的完整参数；正文标记被剔除。
         assert json.loads(calls[0]) == {"target_directory": "/home/kk"}
-        assert json.loads(calls[1]) == {"-i": True, "glob": "*.{json,toml}", "pattern": "model|grok"}
+        assert json.loads(calls[1]) == {"-i": True, "glob": "*.{json,toml}", "limit": 20, "pattern": "model|grok"}
         assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
         assert len(seen) == 2
         _, detail = get(f"/ui/calls/{latest_call('opencode/zen-free-tool-markup')['id']}")
         reasons = [change["reason"] for change in detail["diff"]["response"]]
         assert reasons.count("从文本工具标记重建工具调用") == 1
         assert reasons.count("丢弃完整参数后的多余片段") == 1
+        assert reasons.count("从正文剔除文本工具标记") == 1
         (output / "zen-free-tool-markup.sse").write_text(wire.decode(), encoding="utf-8")
         passed("free-tool-markup-rebuilds-broken-native-args")
         status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
