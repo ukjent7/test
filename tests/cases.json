@@ -69,6 +69,8 @@
     "prefixed-live-model-catalog-with-configured-keys",
     "models-one-upstream-fails",
     "models-both-upstreams-fail",
+    "opencode-models-filtered-to-free-only",
+    "opencode-unaligned-model-rejected",
     "json-stepfun-route",
     "zen-json-route",
     "zen-native-chat-completions-False",

@@ -4,7 +4,9 @@ mod stream;
 mod tools;
 
 use std::{
+    collections::BTreeSet,
     hash::{DefaultHasher, Hash, Hasher},
+    sync::RwLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -33,9 +35,56 @@ pub fn is_zen(url: &reqwest::Url) -> bool {
         )
 }
 
-/// Zen 的免费模型：-free 后缀，或已知不带后缀的免费 id。
+static DYNAMIC_FREE_MODELS: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
+
+/// Zen 的免费模型：-free 后缀、已知不带后缀的免费 id、或来自 models.dev 0 成本清单。
 pub fn is_free_model(model: &str) -> bool {
-    model.ends_with("-free") || matches!(model, "big-pickle" | "grok-code")
+    if model.ends_with("-free") || matches!(model, "big-pickle" | "grok-code") {
+        return true;
+    }
+    DYNAMIC_FREE_MODELS
+        .read()
+        .is_ok_and(|guard| guard.contains(model))
+}
+
+/// 尝试从 models.dev 异步同步 OpenCode 的免费模型（输入/输出均为 0.00）。
+pub async fn sync_models_dev(client: &reqwest::Client) {
+    let url = "https://models.dev/api.json";
+    let Ok(response) = client
+        .get(url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(bytes) = response.bytes().await else {
+        return;
+    };
+    let Ok(data) = serde_json::from_slice::<Value>(&bytes) else {
+        return;
+    };
+    let Some(models) = data
+        .get("opencode")
+        .and_then(|v| v.get("models"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let mut free = BTreeSet::new();
+    for (id, info) in models {
+        let cost = &info["cost"];
+        let input_zero = cost["input"].as_f64().is_some_and(|v| v == 0.0);
+        let output_zero = cost["output"].as_f64().is_some_and(|v| v == 0.0);
+        if input_zero && output_zero {
+            free.insert(id.clone());
+        }
+    }
+    if !free.is_empty() {
+        if let Ok(mut guard) = DYNAMIC_FREE_MODELS.write() {
+            *guard = free;
+        }
+    }
 }
 
 pub fn prepare_headers(

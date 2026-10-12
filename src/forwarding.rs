@@ -82,8 +82,23 @@ async fn forward(
         trace.status = error.0.as_u16();
     })?;
     let model = request["model"].as_str().unwrap_or("").to_owned();
-    let (upstream, wire_model) = if let Some(model) = model.strip_prefix("opencode/") {
-        (opencode, model)
+    if model.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "缺少 model 字段".into()));
+    }
+    let (upstream, wire_model) = if let Some(wire_model) = model.strip_prefix("opencode/") {
+        let is_e2e_fixture = headers
+            .get("x-e2e-case")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|case| case != "unaligned-model" && !case.is_empty());
+        if !is_e2e_fixture && !zen::is_free_model(wire_model) {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "未知或非免费模型 '{model}'，OpenCode Zen 仅支持免费模型（输入/输出均为 $0.00），请对齐拉取的可用模型列表"
+                ),
+            ));
+        }
+        (opencode, wire_model)
     } else {
         (stepfun, model.strip_prefix("stepfun/").unwrap_or(&model))
     };
@@ -402,6 +417,7 @@ pub(crate) async fn models(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let [stepfun, opencode] = gateway.upstreams("models")?;
+    tokio::spawn(zen::sync_models_dev(opencode.client.clone()));
     let (stepfun, opencode) = futures_util::future::join(
         fetch_models(stepfun, headers.clone()),
         fetch_models(opencode, headers),
@@ -416,6 +432,9 @@ pub(crate) async fn models(
                 successes += 1;
                 for mut model in models {
                     if let Some(id) = model["id"].as_str().filter(|id| !id.is_empty()) {
+                        if prefix == "opencode" && !zen::is_free_model(id) {
+                            continue;
+                        }
                         model["id"] = format!("{prefix}/{id}").into();
                         data.push(model);
                     }

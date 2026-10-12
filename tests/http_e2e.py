@@ -76,12 +76,15 @@ class MockUpstream(BaseHTTPRequestHandler):
         provider = "opencode" if "/zen/v1/models" in self.path else "stepfun"
         self.captures[f"models-{provider}"] = {"path": self.path, "headers": dict(self.headers)}
         status = self.model_errors.get(provider, 200)
-        payload = {
-            "object": "list",
-            "data": [
-                {"id": "mimo-v2.5-free" if provider == "opencode" else "step-5-preview", "object": "model", "created": 7, "owned_by": provider}
-            ],
-        }
+        data = (
+            [{"id": "step-5-preview", "object": "model", "created": 7, "owned_by": provider}]
+            if provider == "stepfun"
+            else [
+                {"id": "mimo-v2.5-free", "object": "model", "created": 7, "owned_by": provider},
+                {"id": "claude-sonnet-5", "object": "model", "created": 7, "owned_by": provider},
+            ]
+        )
+        payload = {"object": "list", "data": data}
         wire = json.dumps(payload if status == 200 else {"error": "fixture"}).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -851,6 +854,8 @@ def run_model_catalog_and_routing_cases(ctx):
         json.dumps({"catalog": catalog, "upstreams": {k: v for k, v in ctx.captures.items() if k.startswith("models-")}}, indent=2)
     )
     assert ctx.get("/models")[1] == catalog
+    assert all("claude" not in m["id"] for m in catalog["data"])
+    ctx.passed("opencode-models-filtered-to-free-only")
     ctx.passed("prefixed-live-model-catalog-with-configured-keys")
 
     ctx.model_errors["stepfun"] = 401
@@ -863,6 +868,14 @@ def run_model_catalog_and_routing_cases(ctx):
     assert ctx.get("/v1/models")[0] == 502
     ctx.passed("models-both-upstreams-fail")
     ctx.model_errors.clear()
+
+    status, _, wire = ctx.post(
+        "unaligned-model",
+        {"model": "opencode/claude-sonnet-5", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert status == 400
+    assert "未知或非免费模型" in wire.decode()
+    ctx.passed("opencode-unaligned-model-rejected")
 
     for provider, case in (("stepfun", "json-stepfun-route"), ("opencode", "zen-json-route")):
         bare = "step-5-preview" if provider == "stepfun" else case
