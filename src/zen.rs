@@ -13,7 +13,7 @@ use serde_json::Value;
 
 pub use collapse::{collapse, collapse_messages};
 pub use stream::StreamFix;
-pub use tools::{ZenTools, prepare_free_body};
+pub use tools::prepare_free_body;
 
 use crate::cache;
 

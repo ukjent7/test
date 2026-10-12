@@ -14,8 +14,8 @@ const STUB_DESCRIPTION: &str = "Not available in this session. Never call this t
 /// Zen 免费层的工具整形结果：改名映射与补出来的桩。
 #[derive(Default)]
 pub struct ZenTools {
-    pub(crate) back: BTreeMap<String, String>,   // 提供给 Zen 的名字 → 客户端原名
-    pub(crate) stubs: BTreeSet<String>,          // 客户端没有、只为 Zen 补的名字
+    pub(crate) back: BTreeMap<String, String>, // 提供给 Zen 的名字 → 客户端原名
+    pub(crate) stubs: BTreeSet<String>,        // 客户端没有、只为 Zen 补的名字
     pub(crate) schemas: BTreeMap<String, Value>, // 客户端原名 → 参数 schema
 }
 
