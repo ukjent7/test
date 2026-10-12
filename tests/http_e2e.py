@@ -1191,7 +1191,7 @@ def run_zen_free_tier_cases(ctx):
         {"role": "tool", "tool_call_id": "call_list", "content": "file1\nfile2"},
     ]
     status, _, wire, seen = free_post(
-        "zen-tool-align-free",
+        "zen-free-tool-align-free",
         tools=align_payload_tools,
         messages=align_messages,
     )
@@ -1202,7 +1202,7 @@ def run_zen_free_tier_cases(ctx):
     assert [m["tool_call_id"] for m in tool_msgs] == ["call_list", "call_git", "call_grep"]
     assert [m["name"] for m in tool_msgs] == ["list_dir", "run_terminal_command", "hashline_grep"]
     assert [m["content"] for m in tool_msgs] == ["file1\nfile2", "fatal: not a git repo", "found: main.rs"]
-    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-tool-align-free')['id']}")
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-align-free')['id']}")
     assert any("对齐并发工具响应顺序与工具名" in change["reason"] for change in detail["diff"]["request"])
     ctx.passed("free-tool-responses-aligned-with-call-order")
 
