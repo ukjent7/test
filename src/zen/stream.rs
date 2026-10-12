@@ -232,7 +232,7 @@ impl StreamFix {
             if let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
                 for mut call in calls.drain(..) {
                     let call_index = call["index"].as_u64().unwrap_or(0);
-                    let name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                    let mut name = call["function"]["name"].as_str().unwrap_or("").to_owned();
                     if self.tools.is_stub(&name) {
                         self.stub_calls.insert((choice_index, call_index));
                         changes.push(Change::new(
