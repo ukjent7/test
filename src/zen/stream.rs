@@ -27,13 +27,13 @@ pub struct StreamFix {
     stub_blocks: BTreeSet<u64>,
     dropped_blocks: u64,
     stub_calls: BTreeSet<(u64, u64)>,
-    dropped_calls: BTreeMap<u64, u64>,
     calls_made: bool,
     stub_ids: BTreeSet<String>,
     dropped_items: u64,
     call_args: BTreeMap<(u64, u64), CallArgs>,
+    call_map: BTreeMap<(u64, u64), u64>,
+    next_client_index: BTreeMap<u64, u64>,
     markup: Option<String>,
-    max_index: BTreeMap<u64, u64>,
     synthetic: u64,
 }
 
@@ -44,13 +44,13 @@ impl StreamFix {
             stub_blocks: BTreeSet::new(),
             dropped_blocks: 0,
             stub_calls: BTreeSet::new(),
-            dropped_calls: BTreeMap::new(),
             calls_made: false,
             stub_ids: BTreeSet::new(),
             dropped_items: 0,
             call_args: BTreeMap::new(),
+            call_map: BTreeMap::new(),
+            next_client_index: BTreeMap::new(),
             markup: None,
-            max_index: BTreeMap::new(),
             synthetic: 0,
         }
     }
@@ -228,7 +228,6 @@ impl StreamFix {
                     }
                 }
             }
-            let dropped = self.dropped_calls.entry(choice_index).or_default();
             let mut kept = Vec::new();
             if let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
                 for mut call in calls.drain(..) {
@@ -236,7 +235,6 @@ impl StreamFix {
                     let name = call["function"]["name"].as_str().unwrap_or("").to_owned();
                     if self.tools.is_stub(&name) {
                         self.stub_calls.insert((choice_index, call_index));
-                        *dropped += 1;
                         changes.push(Change::new(
                             format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
                             Some(call),
@@ -251,14 +249,24 @@ impl StreamFix {
                     if !name.is_empty() {
                         self.calls_made = true;
                     }
-                    let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
+                    let client_index = *self
+                        .call_map
+                        .entry((choice_index, call_index))
+                        .or_insert_with(|| {
+                            let next = self.next_client_index.entry(choice_index).or_default();
+                            let current = *next;
+                            *next += 1;
+                            current
+                        });
+                    call["index"] = json!(client_index);
+                    let path = format!("/choices/{choice_index}/delta/tool_calls/{client_index}");
                     let fragment = call["function"]["arguments"]
                         .as_str()
                         .unwrap_or("")
                         .to_owned();
                     let entry = self
                         .call_args
-                        .entry((choice_index, call_index))
+                        .entry((choice_index, client_index))
                         .or_default();
                     if !name.is_empty() {
                         entry.name = name;
@@ -282,11 +290,6 @@ impl StreamFix {
                             call["function"]["arguments"] = json!("");
                         }
                     }
-                    if *dropped > 0 {
-                        call["index"] = json!(call_index - *dropped);
-                    }
-                    let max = self.max_index.entry(choice_index).or_insert(0);
-                    *max = (*max).max(call_index.saturating_sub(*dropped));
                     kept.push(call);
                 }
                 *calls = kept;
@@ -312,25 +315,22 @@ impl StreamFix {
                     .find(|((choice, _), entry)| {
                         *choice == choice_index && !entry.flushed && entry.name == name
                     })
-                    .map(|(key, entry)| {
+                    .map(|((_, client_index), entry)| {
                         entry.flushed = true;
-                        key.1.saturating_sub(*dropped)
+                        *client_index
                     });
                 let entry = match matched {
                     Some(index) => json!({"index": index,
                         "function": {"arguments": args}}),
                     None => {
-                        let index = self
-                            .max_index
-                            .get(&choice_index)
-                            .copied()
-                            .map_or(0, |max| max + 1);
-                        self.max_index.insert(choice_index, index);
+                        let next = self.next_client_index.entry(choice_index).or_default();
+                        let index = *next;
+                        *next += 1;
                         self.synthetic += 1;
                         let mut hasher = DefaultHasher::new();
                         (choice_index, index, self.synthetic).hash(&mut hasher);
                         self.call_args.insert(
-                            (choice_index, index + *dropped),
+                            (choice_index, index),
                             CallArgs {
                                 name: name.clone(),
                                 text: String::new(),
@@ -375,14 +375,13 @@ impl StreamFix {
                 continue;
             }
             let choice_index = choice["index"].as_u64().unwrap_or(0);
-            let dropped = self.dropped_calls.get(&choice_index).copied().unwrap_or(0);
             let mut extra = Vec::new();
-            for ((call_choice, call_index), entry) in self.call_args.iter_mut() {
+            for ((call_choice, client_index), entry) in self.call_args.iter_mut() {
                 if *call_choice != choice_index || entry.flushed || entry.text.is_empty() {
                     continue;
                 }
                 entry.flushed = true;
-                extra.push(json!({"index": *call_index - dropped,
+                extra.push(json!({"index": *client_index,
                     "function": {"arguments": entry.text.clone()}}));
                 changes.push(Change::new(
                     format!("/choices/{choice_index}/delta/tool_calls"),

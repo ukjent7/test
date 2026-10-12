@@ -247,6 +247,32 @@ class MockUpstream(BaseHTTPRequestHandler):
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+        elif case == "zen-free-multi-tool-concurrency":
+            def call_fragment(args, index=0):
+                return {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": index, "function": {"arguments": args}}]}}]}
+            chunks = [
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_ls", "type": "function", "function": {"name": "list_dir", "arguments": ""}}]}}]},
+                call_fragment(""),
+                call_fragment('{"target_directory": "/mnt/d/work/pi"}'),
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 1, "id": "call_hg_1", "type": "function", "function": {"name": "hashline_grep", "arguments": ""}}]}}]},
+                call_fragment("", index=1),
+                call_fragment('{"glob": ', index=1),
+                {"choices": [{"index": 0, "delta": {"content": '<tool_call><function=hashline_grep><parameter=glob>*.{rs,ts,go}</parameter><parameter=head_limit>40</parameter><parameter=path>/mnt/d/work</parameter><parameter=pattern>fn main|async fn</parameter></function></tool_call>'}}]},
+                call_fragment('40}', index=1),
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 2, "id": "call_cmd_1", "type": "function", "function": {"name": "run_terminal_command", "arguments": ""}}]}}]},
+                call_fragment("", index=2),
+                call_fragment('{"block_until_ms": 10000', index=2),
+                {"choices": [{"index": 0, "delta": {"content": '<tool_call><function=run_terminal_command><parameter=block_until_ms>10000</parameter><parameter=command>echo hello</parameter><parameter=description>test cmd</parameter></function></tool_call>'}}]},
+                call_fragment('}', index=2),
+                {"choices": [{"index": 0, "delta": {"content": '<tool_call><function=search_tool><parameter=limit>10</parameter><parameter=query>task create list</parameter></function></tool_call>'}}]},
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 3, "id": "call_hg_2", "type": "function", "function": {"name": "hashline_grep", "arguments": ""}}]}}]},
+                call_fragment("", index=3),
+                call_fragment('{"head_limit": 15', index=3),
+                {"choices": [{"index": 0, "delta": {"content": '<tool_call><function=hashline_grep><parameter=head_limit>15</parameter><parameter=path>/mnt/d/work/README.md</parameter><parameter=pattern>^# |^## </parameter></function></tool_call>'}}]},
+                call_fragment('}', index=3),
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+            wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
         elif case == "zen-free-invalid":
             wire = b"data: invalid\n\ndata: [DONE]\n\n"
         elif case in ("zen-free-tool-restart", "zen-free-tool-truncated"):
@@ -1053,6 +1079,93 @@ def run_zen_free_tier_cases(ctx):
     assert reasons.count("从正文剔除文本工具标记") == 1
     (ctx.output / "zen-free-tool-markup.sse").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-tool-markup-rebuilds-broken-native-args")
+
+    status, _, wire, _ = free_post(
+        "zen-free-multi-tool-concurrency",
+        streaming=True,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_dir",
+                    "parameters": {"type": "object", "required": ["target_directory"], "properties": {"target_directory": {"type": "string"}}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "hashline_grep",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["pattern"],
+                        "properties": {
+                            "glob": {"type": "string"},
+                            "head_limit": {"type": ["integer", "null"]},
+                            "path": {"type": "string"},
+                            "pattern": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_terminal_command",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["command"],
+                        "properties": {
+                            "block_until_ms": {"type": "integer"},
+                            "command": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_tool",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["query"],
+                        "properties": {
+                            "limit": {"type": ["integer", "null"]},
+                            "query": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        ],
+    )
+    assert status == 200
+    events = decode_sse(wire)
+    calls = {}
+    call_names = {}
+    for event in events:
+        delta = event["choices"][0].get("delta") or {}
+        assert "<tool_call" not in (delta.get("content") or "")
+        for call in delta.get("tool_calls") or []:
+            idx = call["index"]
+            fn = call.get("function") or {}
+            if fn.get("name"):
+                call_names[idx] = fn["name"]
+            if fn.get("arguments"):
+                calls[idx] = calls.get(idx, "") + fn["arguments"]
+    assert len(call_names) == 5
+    assert call_names[0] == "list_dir"
+    assert json.loads(calls[0]) == {"target_directory": "/mnt/d/work/pi"}
+    assert call_names[1] == "hashline_grep"
+    assert json.loads(calls[1]) == {"glob": "*.{rs,ts,go}", "head_limit": 40, "path": "/mnt/d/work", "pattern": "fn main|async fn"}
+    assert call_names[2] == "run_terminal_command"
+    assert json.loads(calls[2]) == {"block_until_ms": 10000, "command": "echo hello", "description": "test cmd"}
+    assert call_names[3] == "search_tool"
+    assert json.loads(calls[3]) == {"limit": 10, "query": "task create list"}
+    assert call_names[4] == "hashline_grep"
+    assert json.loads(calls[4]) == {"head_limit": 15, "path": "/mnt/d/work/README.md", "pattern": "^# |^## "}
+    assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    (ctx.output / "zen-free-multi-tool-concurrency.sse").write_text(wire.decode(), encoding="utf-8")
+    ctx.passed("free-multi-tool-concurrency-preserves-indices-and-names")
 
     status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
     assert status == 200
