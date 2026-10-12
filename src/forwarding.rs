@@ -96,7 +96,10 @@ async fn forward(
     if anthropic {
         trace.diff.request = normalize_history(&mut request);
     }
-    trace.diff.request.extend(align_tool_responses(&mut request));
+    trace
+        .diff
+        .request
+        .extend(align_tool_responses(&mut request));
     if wire_model != model {
         trace.diff.request.push(Change::new(
             String::new(),
