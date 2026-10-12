@@ -260,6 +260,16 @@ impl StreamFix {
                         });
                     call["index"] = json!(client_index);
                     let path = format!("/choices/{choice_index}/delta/tool_calls/{client_index}");
+                    if let Some(normalized) = self.tools.normalize_name(&name) {
+                        changes.push(Change::new(
+                            format!("{path}/function/name"),
+                            Some(json!(name)),
+                            Some(json!(&normalized)),
+                            "纠偏工具名标记符号泄漏",
+                        ));
+                        name = normalized;
+                        call["function"]["name"] = json!(name);
+                    }
                     let fragment = call["function"]["arguments"]
                         .as_str()
                         .unwrap_or("")
@@ -284,6 +294,14 @@ impl StreamFix {
                         }
                     } else {
                         entry.text.push_str(&fragment);
+                        if let Some(before) = self.tools.normalize_args(&entry.name, &mut entry.text) {
+                            changes.push(Change::new(
+                                format!("{path}/function/arguments"),
+                                Some(json!(before)),
+                                Some(json!(&entry.text)),
+                                "对齐工具参数别名",
+                            ));
+                        }
                         if Self::args_valid(&self.tools.schemas, &entry.name, &entry.text) {
                             entry.flushed = true;
                             call["function"]["arguments"] = json!(entry.text.clone());
@@ -306,7 +324,16 @@ impl StreamFix {
                     delta.remove("tool_calls");
                 }
             }
-            for (name, params) in markup_calls {
+            for (mut name, params) in markup_calls {
+                if let Some(normalized) = self.tools.normalize_name(&name) {
+                    changes.push(Change::new(
+                        format!("/choices/{choice_index}/delta/tool_calls"),
+                        Some(json!(name)),
+                        Some(json!(&normalized)),
+                        "纠偏工具名标记符号泄漏",
+                    ));
+                    name = normalized;
+                }
                 let mut object = serde_json::Map::new();
                 for (key, raw) in &params {
                     let typed = match self.tools.schemas.get(&name) {
@@ -315,7 +342,15 @@ impl StreamFix {
                     };
                     object.insert(key.clone(), typed);
                 }
-                let args = serde_json::to_string(&object).unwrap();
+                let mut args = serde_json::to_string(&object).unwrap();
+                if let Some(before) = self.tools.normalize_args(&name, &mut args) {
+                    changes.push(Change::new(
+                        format!("/choices/{choice_index}/delta/tool_calls"),
+                        Some(json!(before)),
+                        Some(json!(&args)),
+                        "对齐工具参数别名",
+                    ));
+                }
                 let matched = self
                     .call_args
                     .iter_mut()
@@ -387,6 +422,14 @@ impl StreamFix {
                 if *call_choice != choice_index || entry.flushed || entry.text.is_empty() {
                     continue;
                 }
+                if let Some(before) = self.tools.normalize_args(&entry.name, &mut entry.text) {
+                    changes.push(Change::new(
+                        format!("/choices/{choice_index}/delta/tool_calls/{client_index}/function/arguments"),
+                        Some(json!(before)),
+                        Some(json!(&entry.text)),
+                        "对齐工具参数别名",
+                    ));
+                }
                 entry.flushed = true;
                 extra.push(json!({"index": *client_index,
                     "function": {"arguments": entry.text.clone()}}));
@@ -422,7 +465,17 @@ impl StreamFix {
             Some("response.output_item.added" | "response.output_item.done") => {
                 let output_index = value["output_index"].as_u64().unwrap_or(0);
                 if value["item"]["type"] == "function_call" {
-                    let name = value["item"]["name"].as_str().unwrap_or("").to_owned();
+                    let mut name = value["item"]["name"].as_str().unwrap_or("").to_owned();
+                    if let Some(normalized) = self.tools.normalize_name(&name) {
+                        changes.push(Change::new(
+                            format!("/output_item/{output_index}/item/name"),
+                            Some(json!(name)),
+                            Some(json!(&normalized)),
+                            "纠偏工具名标记符号泄漏",
+                        ));
+                        name = normalized;
+                        value["item"]["name"] = json!(name);
+                    }
                     let id = value["item"]["id"].as_str().unwrap_or("").to_owned();
                     if self.tools.is_stub(&name) {
                         self.stub_ids.insert(id);

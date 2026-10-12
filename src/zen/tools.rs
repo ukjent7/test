@@ -22,6 +22,57 @@ impl ZenTools {
         self.stubs.contains(name)
     }
 
+    /// 纠偏常见工具名符号错误（例如模型将 XML 标记中的 `=` 带入函数名 `hashline=grep`）。
+    pub(crate) fn normalize_name(&self, name: &str) -> Option<String> {
+        if name.is_empty() || self.schemas.contains_key(name) {
+            return None;
+        }
+        let candidate = name.replace('=', "_");
+        if candidate != name && self.schemas.contains_key(&candidate) {
+            Some(candidate)
+        } else {
+            None
+        }
+    }
+
+    /// 对齐常见参数别名（例如模型习惯输出 file_path，但客户端仅接受 target_file）。
+    pub(crate) fn normalize_args(&self, name: &str, text: &mut String) -> Option<String> {
+        let schema = self.schemas.get(name)?;
+        let mut value = serde_json::from_str::<Value>(text).ok()?;
+        let object = value.as_object_mut()?;
+        let mut changed = false;
+        const ALIASES: &[(&str, &[&str])] = &[
+            ("target_file", &["file_path", "filepath", "path"]),
+            ("target_directory", &["directory", "dir_path", "dir", "path"]),
+            ("file_path", &["target_file", "filepath"]),
+        ];
+        for &(canonical, aliases) in ALIASES {
+            let has_canonical_prop = schema["properties"].get(canonical).is_some();
+            let is_canonical_req = schema["required"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|v| v == canonical));
+            if (!has_canonical_prop && !is_canonical_req) || object.contains_key(canonical) {
+                continue;
+            }
+            for &alias in aliases {
+                if schema["properties"].get(alias).is_none()
+                    && let Some(val) = object.remove(alias)
+                {
+                    object.insert(canonical.to_string(), val);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if changed {
+            let serialized = serde_json::to_string(&value).ok()?;
+            let old = std::mem::replace(text, serialized);
+            Some(old)
+        } else {
+            None
+        }
+    }
+
     /// 非流式 JSON 回复：丢弃桩调用，没有真实调用时把工具
     /// 结束改判为普通结束。
     pub fn fix_response(&self, value: &mut Value, endpoint: &str) -> Vec<Change> {
@@ -73,9 +124,19 @@ impl ZenTools {
                         continue;
                     };
                     let mut kept = Vec::new();
-                    for (call_position, call) in calls.drain(..).enumerate() {
-                        let name = call["function"]["name"].as_str().unwrap_or("");
-                        if self.is_stub(name) {
+                    for (call_position, mut call) in calls.drain(..).enumerate() {
+                        let mut name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                        if let Some(normalized) = self.normalize_name(&name) {
+                            changes.push(Change::new(
+                                format!("/choices/{position}/message/tool_calls/{call_position}/function/name"),
+                                Some(json!(name)),
+                                Some(json!(&normalized)),
+                                "纠偏工具名标记符号泄漏",
+                            ));
+                            name = normalized;
+                            call["function"]["name"] = json!(name);
+                        }
+                        if self.is_stub(&name) {
                             changes.push(Change::new(
                                 format!("/choices/{position}/message/tool_calls/{call_position}"),
                                 Some(call),
@@ -83,6 +144,18 @@ impl ZenTools {
                                 "丢弃 Zen 免费层桩工具调用",
                             ));
                             continue;
+                        }
+                        if let Some(args) = call["function"]["arguments"].as_str() {
+                            let mut args_text = args.to_owned();
+                            if let Some(before) = self.normalize_args(&name, &mut args_text) {
+                                changes.push(Change::new(
+                                    format!("/choices/{position}/message/tool_calls/{call_position}/function/arguments"),
+                                    Some(json!(before)),
+                                    Some(json!(&args_text)),
+                                    "对齐工具参数别名",
+                                ));
+                                call["function"]["arguments"] = json!(args_text);
+                            }
                         }
                         kept.push(call);
                     }
@@ -116,10 +189,20 @@ impl ZenTools {
 
 pub(crate) fn fix_output(output: &mut Vec<Value>, changes: &mut Vec<Change>, tools: &ZenTools) {
     let mut kept = Vec::new();
-    for (position, item) in output.drain(..).enumerate() {
+    for (position, mut item) in output.drain(..).enumerate() {
         if item["type"] == "function_call" {
-            let name = item["name"].as_str().unwrap_or("");
-            if tools.is_stub(name) {
+            let mut name = item["name"].as_str().unwrap_or("").to_owned();
+            if let Some(normalized) = tools.normalize_name(&name) {
+                changes.push(Change::new(
+                    format!("/output/{position}/name"),
+                    Some(json!(name)),
+                    Some(json!(&normalized)),
+                    "纠偏工具名标记符号泄漏",
+                ));
+                name = normalized;
+                item["name"] = json!(name);
+            }
+            if tools.is_stub(&name) {
                 changes.push(Change::new(
                     format!("/output/{position}"),
                     Some(item),
@@ -127,6 +210,18 @@ pub(crate) fn fix_output(output: &mut Vec<Value>, changes: &mut Vec<Change>, too
                     "丢弃 Zen 免费层桩工具调用",
                 ));
                 continue;
+            }
+            if let Some(args) = item["arguments"].as_str() {
+                let mut args_text = args.to_owned();
+                if let Some(before) = tools.normalize_args(&name, &mut args_text) {
+                    changes.push(Change::new(
+                        format!("/output/{position}/arguments"),
+                        Some(json!(before)),
+                        Some(json!(&args_text)),
+                        "对齐工具参数别名",
+                    ));
+                    item["arguments"] = json!(args_text);
+                }
             }
         }
         kept.push(item);

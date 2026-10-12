@@ -83,6 +83,7 @@
     "free-tool-args-truncated-sent-with-finish",
     "free-tool-markup-rebuilds-broken-native-args",
     "free-multi-tool-concurrency-preserves-indices-and-names",
+    "free-tool-alias-and-typo-repaired",
     "free-tool-responses-aligned-with-call-order",
     "free-reasoning-alias-renamed-to-reasoning-content",
     "free-tools-reasoning-usage-and-multiple-choices",

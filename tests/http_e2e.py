@@ -247,6 +247,19 @@ class MockUpstream(BaseHTTPRequestHandler):
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+        elif case == "zen-free-tool-alias-and-typo":
+            def call_fragment(args, index=0):
+                return {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": index, "function": {"arguments": args}}]}}]}
+            chunks = [
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_read", "type": "function", "function": {"name": "hashline_read", "arguments": ""}}]}}]},
+                call_fragment(""),
+                call_fragment('{"file_path": "/mnt/d/work/test.rs"}'),
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 1, "id": "call_grep", "type": "function", "function": {"name": "hashline=grep", "arguments": ""}}]}}]},
+                call_fragment("", index=1),
+                call_fragment('{"pattern": "main"}', index=1),
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+            wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
         elif case == "zen-free-multi-tool-concurrency":
             def call_fragment(args, index=0):
                 return {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": index, "function": {"arguments": args}}]}}]}
@@ -1169,6 +1182,49 @@ def run_zen_free_tier_cases(ctx):
     assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
     (ctx.output / "zen-free-multi-tool-concurrency.sse").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-multi-tool-concurrency-preserves-indices-and-names")
+
+    status, _, wire, _ = free_post(
+        "zen-free-tool-alias-and-typo",
+        streaming=True,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "hashline_read",
+                    "parameters": {"type": "object", "required": ["target_file"], "properties": {"target_file": {"type": "string"}}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "hashline_grep",
+                    "parameters": {"type": "object", "required": ["pattern"], "properties": {"pattern": {"type": "string"}}},
+                },
+            },
+        ],
+    )
+    assert status == 200
+    events = decode_sse(wire)
+    calls = {}
+    call_names = {}
+    for event in events:
+        for call in event["choices"][0].get("delta", {}).get("tool_calls") or []:
+            idx = call["index"]
+            fn = call.get("function") or {}
+            if fn.get("name"):
+                call_names[idx] = fn["name"]
+            if fn.get("arguments"):
+                calls[idx] = calls.get(idx, "") + fn["arguments"]
+    assert call_names[0] == "hashline_read"
+    assert json.loads(calls[0]) == {"target_file": "/mnt/d/work/test.rs"}
+    assert call_names[1] == "hashline_grep"
+    assert json.loads(calls[1]) == {"pattern": "main"}
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-alias-and-typo')['id']}")
+    reasons = [change["reason"] for change in detail["diff"]["response"]]
+    assert "对齐工具参数别名" in reasons
+    assert "纠偏工具名标记符号泄漏" in reasons
+    (ctx.output / "zen-free-tool-alias-and-typo.sse").write_text(wire.decode(), encoding="utf-8")
+    ctx.passed("free-tool-alias-and-typo-repaired")
 
     align_payload_tools = [
         {"type": "function", "function": {"name": "list_dir", "parameters": {"type": "object"}}},
