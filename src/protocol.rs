@@ -57,10 +57,10 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
                 },
                 "剔除无效空工具调用",
             ));
-            if tc_array.is_empty() {
-                if let Some(obj) = messages[i].as_object_mut() {
-                    obj.remove("tool_calls");
-                }
+            if tc_array.is_empty()
+                && let Some(obj) = messages[i].as_object_mut()
+            {
+                obj.remove("tool_calls");
             }
         }
         let mut order_map = HashMap::new();
