@@ -43,7 +43,10 @@ impl ZenTools {
         let mut changed = false;
         const ALIASES: &[(&str, &[&str])] = &[
             ("target_file", &["file_path", "filepath", "path"]),
-            ("target_directory", &["directory", "dir_path", "dir", "path"]),
+            (
+                "target_directory",
+                &["directory", "dir_path", "dir", "path"],
+            ),
             ("file_path", &["target_file", "filepath"]),
         ];
         for &(canonical, aliases) in ALIASES {

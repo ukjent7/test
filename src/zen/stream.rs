@@ -294,7 +294,9 @@ impl StreamFix {
                         }
                     } else {
                         entry.text.push_str(&fragment);
-                        if let Some(before) = self.tools.normalize_args(&entry.name, &mut entry.text) {
+                        if let Some(before) =
+                            self.tools.normalize_args(&entry.name, &mut entry.text)
+                        {
                             changes.push(Change::new(
                                 format!("{path}/function/arguments"),
                                 Some(json!(before)),
