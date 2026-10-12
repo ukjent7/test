@@ -39,7 +39,7 @@ jobs:
           components: clippy
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.14'
       - name: Linux build prerequisites
         if: runner.os == 'Linux'
         timeout-minutes: 5
@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.14'
           cache: pip
           cache-dependency-path: tests/requirements.txt
       - uses: actions/download-artifact@v8
