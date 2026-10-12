@@ -220,6 +220,8 @@ impl ZenTools {
     }
 }
 
+type MarkupCall = (String, Vec<(String, String)>);
+
 impl StreamFix {
     /// 流式回复的逐帧修复：返回是否保留该帧。
     pub fn frame(&mut self, value: &mut Value, endpoint: &str) -> (bool, Vec<Change>) {
@@ -252,7 +254,7 @@ impl StreamFix {
 
     /// 扫描并剔除 content 里的 <tool_call> 文本标记：标记段完整时解析出调用，
     /// 正文只保留标记外的普通文本，避免标记泄露给客户端污染历史。
-    fn scan_markup(&mut self, chunk: &str) -> (String, Vec<(String, Vec<(String, String)>)>) {
+    fn scan_markup(&mut self, chunk: &str) -> (String, Vec<MarkupCall>) {
         let mut calls = Vec::new();
         let mut clean = String::new();
         let mut text = chunk;
@@ -676,7 +678,7 @@ impl StreamFix {
 
 /// 解析单个 <tool_call> 标记段（不含收尾标签）：<function=名字> 后跟
 /// 一串 <parameter=键>值</parameter>；结构不符时放弃，content 原样保留。
-fn parse_markup_call(region: &str) -> Option<(String, Vec<(String, String)>)> {
+fn parse_markup_call(region: &str) -> Option<MarkupCall> {
     let rest = region.strip_prefix("<tool_call>")?.trim_start();
     let rest = rest.strip_prefix("<function=")?;
     let end = rest.find('>')?;
