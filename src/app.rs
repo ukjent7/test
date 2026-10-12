@@ -1,4 +1,5 @@
 mod trace;
+mod ui;
 
 use std::{
     env,
@@ -10,15 +11,13 @@ use std::{
 };
 
 use axum::{
-    Json, Router,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State},
-    http::{StatusCode, header},
-    middleware::{self, Next},
-    response::{Html, IntoResponse, Response},
+    Router,
+    extract::DefaultBodyLimit,
+    http::StatusCode,
+    response::Html,
     routing::{get, post},
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::Serialize;
 
 pub(crate) use trace::{Change, Trace};
 
@@ -29,29 +28,29 @@ use crate::{
 };
 
 #[derive(Default, Serialize)]
-struct Stats {
-    requests: u64,
-    active: u64,
-    repairs: usize,
-    errors: u64,
+pub(super) struct Stats {
+    pub(super) requests: u64,
+    pub(super) active: u64,
+    pub(super) repairs: usize,
+    pub(super) errors: u64,
 }
 
-struct Control {
-    settings: Settings,
-    clients: [reqwest::Client; 2],
-    messages_url: reqwest::Url,
-    opencode_url: reqwest::Url,
-    stats: Stats,
-    history: history::History,
-    next_id: i64,
-    history_error: Option<String>,
+pub(super) struct Control {
+    pub(super) settings: Settings,
+    pub(super) clients: [reqwest::Client; 2],
+    pub(super) messages_url: reqwest::Url,
+    pub(super) opencode_url: reqwest::Url,
+    pub(super) stats: Stats,
+    pub(super) history: history::History,
+    pub(super) next_id: i64,
+    pub(super) history_error: Option<String>,
 }
 
 pub struct Gateway {
-    control: Mutex<Control>,
-    settings_path: PathBuf,
-    listen: SocketAddr,
-    routing_hasher: RandomState,
+    pub(super) control: Mutex<Control>,
+    pub(super) settings_path: PathBuf,
+    pub(super) listen: SocketAddr,
+    pub(super) routing_hasher: RandomState,
 }
 
 pub(crate) struct Upstream {
@@ -141,35 +140,6 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         listen,
         routing_hasher: RandomState::new(),
     });
-    let ui = Router::new()
-        .route("/ui/status", get(status))
-        .route("/ui/usage", get(usage))
-        .route("/ui/calls/{id}", get(call_diff))
-        .route("/ui/settings", post(update_settings))
-        .route("/ui/enabled", post(set_enabled))
-        .layer(middleware::from_fn(local_control));
-    let mut assets = Router::new();
-    for (path, source) in [
-        ("/app.css", include_str!("../ui/app.css")),
-        ("/app.js", include_str!("../ui/app.js")),
-        ("/core.js", include_str!("../ui/core.js")),
-        ("/gateway.js", include_str!("../ui/gateway.js")),
-        ("/settings.js", include_str!("../ui/settings.js")),
-        ("/activity.js", include_str!("../ui/activity.js")),
-        ("/details.js", include_str!("../ui/details.js")),
-        ("/usage.js", include_str!("../ui/usage.js")),
-        ("/byte-diff.js", include_str!("../ui/byte-diff.js")),
-    ] {
-        let content_type = if path.ends_with(".css") {
-            "text/css; charset=utf-8"
-        } else {
-            "text/javascript; charset=utf-8"
-        };
-        assets = assets.route(
-            path,
-            get(move || async move { ([(header::CONTENT_TYPE, content_type)], source) }),
-        );
-    }
     let app = Router::new()
         .route("/v1/messages", post(forwarding::messages))
         .route("/messages", post(forwarding::messages))
@@ -184,154 +154,9 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
             "/",
             get(|| async { Html(include_str!("../ui/index.html")) }),
         )
-        .merge(assets)
-        .merge(ui)
+        .merge(ui::assets())
+        .merge(ui::router())
         .layer(DefaultBodyLimit::disable())
         .with_state(gateway);
     Ok((listener, app))
-}
-
-async fn local_control(
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let host = request
-        .headers()
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    let local_host = reqwest::Url::parse(&format!("http://{host}"))
-        .ok()
-        .is_some_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost")));
-    let same_origin = request
-        .headers()
-        .get(header::ORIGIN)
-        .is_none_or(|origin| origin.as_bytes() == format!("http://{host}").as_bytes());
-    if !peer.ip().is_loopback() || !local_host || !same_origin {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    next.run(request).await
-}
-
-async fn status(State(gateway): State<Arc<Gateway>>) -> Result<Json<Value>, ApiError> {
-    let control = gateway.control.lock().unwrap();
-    let calls = control.history.list().map_err(history_error)?;
-    Ok(Json(json!({
-        "version": env!("CARGO_PKG_VERSION"), "enabled": control.settings.enabled,
-        "upstream_base_url": control.settings.upstream_base_url,
-        "opencode_base_url": control.settings.opencode_base_url,
-        "stepfun_key_configured": !control.settings.stepfun_api_key.is_empty(),
-        "opencode_key_configured": !control.settings.opencode_api_key.is_empty(),
-        "proxy": control.settings.proxy,
-        "stepfun_use_proxy": control.settings.stepfun_use_proxy,
-        "opencode_use_proxy": control.settings.opencode_use_proxy,
-        "endpoint": format!("http://{}/v1", gateway.listen),
-        "stats": control.stats, "calls": calls, "history_error": control.history_error,
-    })))
-}
-
-async fn call_diff(
-    State(gateway): State<Arc<Gateway>>,
-    Path(id): Path<i64>,
-) -> Result<Json<Value>, ApiError> {
-    let control = gateway.control.lock().unwrap();
-    let detail = control
-        .history
-        .detail(id)
-        .map_err(history_error)?
-        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "记录已过期，请选择最近的请求".into()))?;
-    Ok(Json(detail))
-}
-
-#[derive(Deserialize)]
-struct UsageQuery {
-    #[serde(default)]
-    since: i64,
-}
-
-async fn usage(
-    State(gateway): State<Arc<Gateway>>,
-    Query(query): Query<UsageQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let control = gateway.control.lock().unwrap();
-    Ok(Json(
-        control.history.usage(query.since).map_err(history_error)?,
-    ))
-}
-
-fn history_error(error: rusqlite::Error) -> ApiError {
-    ApiError(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("无法读取请求历史：{error}"),
-    )
-}
-
-#[derive(Deserialize)]
-struct UpstreamInput {
-    upstream_base_url: String,
-    opencode_base_url: Option<String>,
-    stepfun_api_key: Option<String>,
-    opencode_api_key: Option<String>,
-    proxy: Option<String>,
-    stepfun_use_proxy: Option<bool>,
-    opencode_use_proxy: Option<bool>,
-}
-
-async fn update_settings(
-    State(gateway): State<Arc<Gateway>>,
-    Json(input): Json<UpstreamInput>,
-) -> Result<StatusCode, ApiError> {
-    let base = input
-        .upstream_base_url
-        .trim()
-        .trim_end_matches('/')
-        .to_owned();
-    let url = messages_url(&base)?;
-    let mut control = gateway.control.lock().unwrap();
-    let mut settings = control.settings.clone();
-    settings.upstream_base_url = base;
-    if let Some(base) = input.opencode_base_url {
-        settings.opencode_base_url = base.trim().trim_end_matches('/').to_owned();
-    }
-    let opencode_url = messages_url(&settings.opencode_base_url)?;
-    if let Some(key) = input.stepfun_api_key {
-        settings.stepfun_api_key = key.trim().to_owned();
-    }
-    if let Some(key) = input.opencode_api_key {
-        settings.opencode_api_key = key.trim().to_owned();
-    }
-    if let Some(proxy) = input.proxy {
-        settings.proxy = proxy.trim().to_owned();
-    }
-    if let Some(enabled) = input.stepfun_use_proxy {
-        settings.stepfun_use_proxy = enabled;
-    }
-    if let Some(enabled) = input.opencode_use_proxy {
-        settings.opencode_use_proxy = enabled;
-    }
-    let clients = network_clients(&settings.proxy)?;
-    settings.save(&gateway.settings_path)?;
-    control.settings = settings;
-    control.clients = clients;
-    control.messages_url = url;
-    control.opencode_url = opencode_url;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize)]
-struct EnabledInput {
-    enabled: bool,
-}
-
-async fn set_enabled(
-    State(gateway): State<Arc<Gateway>>,
-    Json(input): Json<EnabledInput>,
-) -> Result<StatusCode, ApiError> {
-    let mut control = gateway.control.lock().unwrap();
-    let mut settings = control.settings.clone();
-    settings.enabled = input.enabled;
-    settings.save(&gateway.settings_path)?;
-    control.settings = settings;
-    Ok(StatusCode::NO_CONTENT)
 }
