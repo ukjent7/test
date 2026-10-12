@@ -166,6 +166,12 @@ function lineDifference(parent, before, after) {
 const formatValue = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item, 2);
 
+const formatPatchValue = value => {
+  if (value === undefined) return '（字段不存在）';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  return formatValue(value);
+};
+
 function jsonDifference(before, after) {
   let left, right;
   try {
@@ -378,14 +384,24 @@ function renderDiff(content, diff) {
         item.append(event);
       }
       if (count === 1 && Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
-        for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
-          const format = value => Object.hasOwn(value, key) ? visible(value[key]) : '（字段不存在）';
-          diffLine(item, 'removed', `− ${key}: ${format(change.before)}`);
-          diffLine(item, 'added', `+ ${key}: ${format(change.after)}`);
+        const isObj = val => val !== null && typeof val === 'object';
+        if (isObj(change.before) && isObj(change.after)) {
+          for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
+            const hasBefore = Object.hasOwn(change.before, key);
+            const hasAfter = Object.hasOwn(change.after, key);
+            if (hasBefore && hasAfter && JSON.stringify(change.before[key]) === JSON.stringify(change.after[key])) {
+              continue;
+            }
+            diffLine(item, 'removed', `− ${key}: ${hasBefore ? formatPatchValue(change.before[key]) : '（字段不存在）'}`, true);
+            diffLine(item, 'added', `+ ${key}: ${hasAfter ? formatPatchValue(change.after[key]) : '（已删除）'}`, true);
+          }
+        } else if (JSON.stringify(change.before) !== JSON.stringify(change.after)) {
+          diffLine(item, 'removed', `− ${formatPatchValue(change.before)}`, true);
+          diffLine(item, 'added', `+ ${formatPatchValue(change.after)}`, true);
         }
       } else if (count === 1 && (Object.hasOwn(change, 'before') || Object.hasOwn(change, 'after'))) {
-        diffLine(item, 'removed', `− ${Object.hasOwn(change, 'before') ? visible(change.before) : '（字段不存在）'}`);
-        diffLine(item, 'added', `+ ${Object.hasOwn(change, 'after') ? visible(change.after) : '（已删除）'}`);
+        diffLine(item, 'removed', `− ${Object.hasOwn(change, 'before') ? formatPatchValue(change.before) : '（字段不存在）'}`, true);
+        diffLine(item, 'added', `+ ${Object.hasOwn(change, 'after') ? formatPatchValue(change.after) : '（已删除）'}`, true);
       }
       section.append(item);
       index += count - 1;

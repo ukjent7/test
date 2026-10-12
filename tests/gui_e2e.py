@@ -644,7 +644,7 @@ def run(binary, output, test):
         expect(json_response.locator('.removed').filter(has_text='"thinking": null')).to_have_count(1)
         expect(json_response.locator('.added').filter(has_text='"thinking": ""')).to_have_count(1)
         expect(page.get_by_test_id("wire-request-1").locator('[data-json-path="/messages/2"]')).to_contain_text("删除")
-        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False).replace(" ", "\\u0020"))
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
         expect(page.get_by_test_id("diff-request")).to_contain_text("/messages/2/content/1 → /messages/1/content/0")
         expect(page.get_by_test_id("diff-response")).to_contain_text("− signature: null")
         expect(page.get_by_test_id("diff-response")).to_contain_text('+ signature: ""')
@@ -652,7 +652,7 @@ def run(binary, output, test):
         assert page.locator("#diff-content img").count() == 0
         page.wait_for_timeout(1200)  # Status polling must preserve the inspected request.
         expect(page.get_by_role("dialog", name="请求 / 响应差异")).to_be_visible()
-        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False).replace(" ", "\\u0020"))
+        expect(page.get_by_test_id("diff-request")).to_contain_text(json.dumps(attack, ensure_ascii=False))
         page.get_by_role("button", name="复制差异", exact=True).click()
         assert json.loads(page.evaluate("navigator.clipboard.readText()")) == detail
         page.get_by_test_id("diff-response").scroll_into_view_if_needed()
@@ -698,6 +698,8 @@ def run(binary, output, test):
         # 只记路径不搬正文的修补（如 Zen 免费层思维链改名）没有 before/after
         # 载荷：对话框必须照常渲染，且正文不出现在差异里。
         chat_body = {"model": "opencode/mimo-v2.5-free", "max_tokens": 64, "stream": True,
+                     "tools": [{"type": "function", "function": {"name": "fixture_echo",
+                                "description": "Echo back fixture text", "parameters": {"type": "object"}}}],
                      "messages": [{"role": "user", "content": "PRIVATE_CHAT_MESSAGE"}]}
         response = context.request.post(address + "/v1/chat/completions", data=chat_body)
         assert response.status == 200
@@ -714,6 +716,10 @@ def run(binary, output, test):
         assert "GUI_RESPONSE_REASONING" not in json.dumps(detail["diff"])
         open_diff(detail)
         expect(page.get_by_test_id("diff-response")).to_contain_text("思维链字段回改为 reasoning_content")
+        expect(page.get_by_test_id("diff-request")).not_to_contain_text("− 0:")
+        expect(page.get_by_test_id("diff-request")).to_contain_text("+ 1:")
+        expect(page.get_by_test_id("diff-request")).to_contain_text("+ 2:")
+        expect(page.get_by_test_id("diff-request")).not_to_contain_text("\\u0020")
         page.keyboard.press("Escape")
         (output / "diff-path-only.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
         passed("diff-path-only-changes-render-without-payload")
