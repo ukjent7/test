@@ -16,7 +16,7 @@ concurrency:
 jobs:
   quality:
     name: Source checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -27,7 +27,7 @@ jobs:
           components: rustfmt
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.14'
+          python-version: '3.15'
       - run: cargo fmt --all -- --check
       - name: Check E2E and frontend syntax
         run: |
@@ -41,7 +41,7 @@ jobs:
       matrix:
         include:
           - platform: linux
-            os: ubuntu-24.04
+            os: ubuntu-26.04
           - platform: windows
             os: windows-latest
     uses: ./.github/workflows/platform.yml
@@ -53,7 +53,7 @@ jobs:
     name: All checks passed
     if: always()
     needs: [quality, platform]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require every job to pass
@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.14'
+          python-version: '3.15'
       - uses: actions/download-artifact@v8
         with:
           path: verified-inputs
@@ -93,7 +93,7 @@ jobs:
     name: Publish release
     needs: ci-status
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: write
