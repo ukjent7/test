@@ -915,9 +915,9 @@ def run_zen_free_tier_cases(ctx):
         "model": "opencode/mimo-v2.5-free",
         "max_tokens": 64,
         "stream": False,
-        "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+        "tools": [{"name": "bash", "input_schema": {"type": "object"}}],
         "messages": [
-            {"role": "assistant", "content": [{"type": "tool_use", "id": "tool_1", "name": "Bash", "input": {}}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "tool_1", "name": "bash", "input": {}}]},
             {"role": "user", "content": "PRIVATE_FREE_MESSAGE"},
         ],
     }
