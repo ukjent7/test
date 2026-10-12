@@ -213,11 +213,11 @@ class MockUpstream(BaseHTTPRequestHandler):
                 },
             }
             wire = b"data: " + json.dumps(completed).encode() + b"\n\n"
-        elif case in ("zen-free-stub", "zen-free-rename"):
-            tool_name = "bash"
+        elif case in ("zen-free-stub", "zen-free-client-tool"):
+            tool_name = "bash" if case == "zen-free-stub" else "run_terminal_command"
             chunks = [
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "" if case == "zen-free-stub" else None}}]} if case == "zen-free-stub" else None,
-                {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_1" if case == "zen-free-rename" else "call_stub", "type": "function", "function": {"name": tool_name, "arguments": '{"command":'}}]}}]},
+                {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_1" if case == "zen-free-client-tool" else "call_stub", "type": "function", "function": {"name": tool_name, "arguments": '{"command":'}}]}}]},
                 {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"ls"}'}}]}}]},
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
             ]
@@ -967,18 +967,22 @@ def run_zen_free_tier_cases(ctx):
     assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"bash", "read"}
     ctx.passed("free-stub-call-dropped-and-stop-reclassified")
 
-    status, _, wire, seen = free_post("zen-free-rename", streaming=True, tools=[{"type": "function", "function": {"name": "Bash"}}])
+    status, _, wire, seen = free_post(
+        "zen-free-client-tool",
+        streaming=True,
+        tools=[{"type": "function", "function": {"name": "run_terminal_command"}}],
+    )
     assert status == 200
     events = decode_sse(wire)
     assert [event["choices"][0]["delta"]["tool_calls"][0]["function"] for event in events[:2]] == [
-        {"name": "Bash", "arguments": ""},
+        {"name": "run_terminal_command", "arguments": ""},
         {"arguments": '{"command":"ls"}'},
     ]
     assert events[2]["choices"][0]["finish_reason"] == "tool_calls"
     assert len(seen) == 2
     tools = seen[1]["body"]["tools"]
-    assert tools[0]["function"]["name"] == "bash" and tools[1]["function"]["name"] == "read"
-    ctx.passed("free-tool-renamed-roundtrip")
+    assert {tool["function"]["name"] for tool in tools} == {"run_terminal_command", "bash", "read"}
+    ctx.passed("free-client-tools-preserved-with-stubs")
 
     status, _, wire, _ = free_post("zen-free-tool-restart", streaming=True)
     assert status == 200

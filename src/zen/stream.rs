@@ -146,16 +146,6 @@ impl StreamFix {
                         self.dropped_blocks += 1;
                         keep = false;
                     } else {
-                        if let Some(client) = self.tools.client_name(&name) {
-                            let before = value["content_block"].clone();
-                            value["content_block"]["name"] = client.into();
-                            changes.push(Change::new(
-                                format!("/content_block/{index}"),
-                                Some(before),
-                                Some(value["content_block"].clone()),
-                                "Zen 免费层工具名回改",
-                            ));
-                        }
                         self.calls_made = true;
                     }
                 }
@@ -258,18 +248,7 @@ impl StreamFix {
                     if self.stub_calls.contains(&(choice_index, call_index)) {
                         continue;
                     }
-                    let client = self.tools.client_name(&name).unwrap_or(&name).to_owned();
-                    if !client.is_empty() {
-                        if client != name {
-                            let before = call.clone();
-                            call["function"]["name"] = client.clone().into();
-                            changes.push(Change::new(
-                                format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
-                                Some(before),
-                                Some(call.clone()),
-                                "Zen 免费层工具名回改",
-                            ));
-                        }
+                    if !name.is_empty() {
                         self.calls_made = true;
                     }
                     let path = format!("/choices/{choice_index}/delta/tool_calls/{call_index}");
@@ -281,8 +260,8 @@ impl StreamFix {
                         .call_args
                         .entry((choice_index, call_index))
                         .or_default();
-                    if !client.is_empty() {
-                        entry.name = client;
+                    if !name.is_empty() {
+                        entry.name = name;
                     }
                     if entry.flushed {
                         if !fragment.is_empty() {
@@ -449,16 +428,6 @@ impl StreamFix {
                             "丢弃 Zen 免费层桩工具调用",
                         ));
                         return (false, changes);
-                    }
-                    if let Some(client) = self.tools.client_name(&name) {
-                        let before = value["item"].clone();
-                        value["item"]["name"] = client.into();
-                        changes.push(Change::new(
-                            format!("/output_item/{output_index}"),
-                            Some(before),
-                            Some(value["item"].clone()),
-                            "Zen 免费层工具名回改",
-                        ));
                     }
                     self.calls_made = true;
                 }
