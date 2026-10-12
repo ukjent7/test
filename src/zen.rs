@@ -376,17 +376,29 @@ impl StreamFix {
             // 转出的原生参数流残缺、串台。文本标记才是可靠来源：解析出
             // 完整调用后按名字补到未完成的序号上，否则追加新序号；正文中的
             // 标记一并剔除，避免污染会话历史。
-            let content = delta.get("content").and_then(Value::as_str).unwrap_or("");
-            let (clean_content, markup_calls) = self.scan_markup(content);
-            if let Some(delta_content) = delta.get_mut("content") {
+            let content_opt = delta
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let mut markup_calls = Vec::new();
+            if let Some(content) = content_opt {
+                let (clean_content, calls) = self.scan_markup(&content);
+                markup_calls = calls;
                 if clean_content != content {
                     let path = format!("/choices/{choice_index}/delta/content");
-                    let before = delta_content.clone();
+                    let before = delta["content"].clone();
                     if clean_content.is_empty() {
-                        delta.as_object_mut().and_then(|obj| obj.remove("content"));
-                        changes.push(Change::new(path, Some(before), None, "从正文剔除文本工具标记"));
+                        if let Some(obj) = delta.as_object_mut() {
+                            obj.remove("content");
+                        }
+                        changes.push(Change::new(
+                            path,
+                            Some(before),
+                            None,
+                            "从正文剔除文本工具标记",
+                        ));
                     } else {
-                        *delta_content = json!(clean_content);
+                        delta["content"] = json!(clean_content);
                         changes.push(Change::new(
                             path,
                             Some(before),
@@ -696,7 +708,10 @@ fn prop_has_type(prop: &Value, expected: &str) -> bool {
     if let Some(types) = prop["type"].as_array() {
         return types.iter().any(|item| item.as_str() == Some(expected));
     }
-    if let Some(union) = prop["anyOf"].as_array().or_else(|| prop["oneOf"].as_array()) {
+    if let Some(union) = prop["anyOf"]
+        .as_array()
+        .or_else(|| prop["oneOf"].as_array())
+    {
         return union.iter().any(|item| prop_has_type(item, expected));
     }
     false
