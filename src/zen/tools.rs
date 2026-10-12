@@ -165,7 +165,7 @@ impl ZenTools {
                                     Some(json!(before)),
                                     Some(json!(&args_text)),
                                     "对齐工具参数别名",
-                                );
+                                ));
                                 call["function"]["arguments"] = json!(args_text);
                             }
                         }
