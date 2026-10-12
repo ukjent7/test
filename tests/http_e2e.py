@@ -268,6 +268,9 @@ class MockUpstream(BaseHTTPRequestHandler):
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 1, "id": "call_grep", "type": "function", "function": {"name": "hashline=grep", "arguments": ""}}]}}]},
                 call_fragment("", index=1),
                 call_fragment('{"pattern": "main"}', index=1),
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 2, "id": "call_workflow", "type": "function", "function": {"name": "workflow", "arguments": ""}}]}}]},
+                call_fragment("", index=2),
+                call_fragment('{"source": "{\\"type\\": \\"validate_only\\", \\"validate_only\\": true}"}', index=2),
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
@@ -1232,6 +1235,23 @@ def run_zen_free_tier_cases(ctx):
                     "parameters": {"type": "object", "required": ["pattern"], "properties": {"pattern": {"type": "string"}}},
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "workflow",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["source"],
+                        "properties": {
+                            "source": {
+                                "oneOf": [
+                                    {"type": "object", "properties": {"type": {"type": "string"}}}
+                                ]
+                            }
+                        },
+                    },
+                },
+            },
         ],
     )
     assert status == 200
@@ -1250,6 +1270,8 @@ def run_zen_free_tier_cases(ctx):
     assert json.loads(calls[0]) == {"target_file": "/mnt/d/work/test.rs"}
     assert call_names[1] == "hashline_grep"
     assert json.loads(calls[1]) == {"pattern": "main"}
+    assert call_names[2] == "workflow"
+    assert json.loads(calls[2]) == {"source": {"type": "validate_only", "validate_only": True}}
     _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-alias-and-typo')['id']}")
     reasons = [change["reason"] for change in detail["diff"]["response"]]
     assert "对齐工具参数别名" in reasons

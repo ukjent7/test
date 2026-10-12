@@ -31,7 +31,7 @@ pub(crate) fn parse_markup_call(region: &str) -> Option<MarkupCall> {
     Some((name, params))
 }
 
-fn prop_has_type(prop: &Value, expected: &str) -> bool {
+pub(crate) fn prop_has_type(prop: &Value, expected: &str) -> bool {
     if prop["type"].as_str() == Some(expected) {
         return true;
     }

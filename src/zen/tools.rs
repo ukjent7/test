@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
+use super::markup;
 use crate::app::Change;
 
 /// Zen 免费层只服务 OpenCode 自身：请求须流式，且提供名为 bash 与 read 的
@@ -64,6 +65,30 @@ impl ZenTools {
                     object.insert(canonical.to_string(), val);
                     changed = true;
                     break;
+                }
+            }
+        }
+        if let Some(properties) = schema["properties"].as_object() {
+            for (key, val) in object.iter_mut() {
+                let Some(raw) = val.as_str() else {
+                    continue;
+                };
+                let Some(prop) = properties.get(key) else {
+                    continue;
+                };
+                let trimmed = raw.trim();
+                let expect_object = trimmed.starts_with('{')
+                    && trimmed.ends_with('}')
+                    && markup::prop_has_type(prop, "object");
+                let expect_array = trimmed.starts_with('[')
+                    && trimmed.ends_with(']')
+                    && markup::prop_has_type(prop, "array");
+                if (expect_object || expect_array)
+                    && let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
+                    && (parsed.is_object() || parsed.is_array())
+                {
+                    *val = parsed;
+                    changed = true;
                 }
             }
         }
