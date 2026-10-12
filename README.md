@@ -72,7 +72,7 @@ api_backend = "chat_completions"
 
 使用 Rust stable、edition 2024，提交依赖锁文件。遵循 [AGENTS.md](AGENTS.md)；本机不安装 Rust、不编译，构建和验证交给 [GitHub Actions](.github/workflows/ci.yml)。
 
-后端按职责组织：`main` 启动程序，`app` 管理状态与本地界面接口，`forwarding` 转发 HTTP，`protocol` 处理 Messages/SSE 兼容，`settings` 读写配置与创建网络客户端；`app::trace` 与 `history` 记录并持久化请求，`zen` 封装 Zen 兼容处理。
+后端按职责组织：`main` 启动程序，`app` 管理网关状态与生命周期（`app::ui` 负责本地界面路由与资产，`app::trace` 负责审计与差异追踪），`forwarding` 转发 HTTP，`protocol` 处理 Messages/SSE 兼容，`settings` 读写配置与创建网络客户端，`history` 记录并持久化请求；`zen` 封装 Zen 兼容处理（细分为 `zen::markup`、`zen::tools`、`zen::stream` 与 `zen::collapse` 子模块）。
 
 前端使用原生 ES modules，随二进制打包，无需 Node 构建：`app.js` 管理导航和状态同步，`gateway` / `settings` 管理接入与设置，`activity` / `details` 展示历史与完整交换，`usage` 展示累计用量。方向键、Home / End 可切换页面；模型与协议选择会更新可复制的客户端配置。
 
