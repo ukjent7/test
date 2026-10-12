@@ -15,7 +15,7 @@ use crate::{
     cache,
     error::ApiError,
     history,
-    protocol::{normalize_history, normalize_response, normalize_sse},
+    protocol::{align_tool_responses, normalize_history, normalize_response, normalize_sse},
     zen,
 };
 
@@ -96,6 +96,7 @@ async fn forward(
     if anthropic {
         trace.diff.request = normalize_history(&mut request);
     }
+    trace.diff.request.extend(align_tool_responses(&mut request));
     if wire_model != model {
         trace.diff.request.push(Change::new(
             String::new(),

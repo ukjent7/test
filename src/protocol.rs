@@ -9,6 +9,70 @@ fn unsigned_thinking(block: &Value) -> bool {
             .is_none_or(|value| value.trim().is_empty())
 }
 
+/// 对齐并发工具响应顺序与工具名：客户端并发执行工具时，完成顺序
+/// 与上一条 assistant 消息里的 tool_calls 声明顺序往往不同，且缺少 name 字段。
+/// 上游模型如果按位置或缺失 name 处理，会导致工具结果错位（如将 git status
+/// 的报错绑定到 list_dir）。将连续的 tool 响应按 tool_calls 顺序稳定重排并补齐 name。
+pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
+    let mut changes = Vec::new();
+    let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) else {
+        return changes;
+    };
+    let mut i = 0;
+    while i < messages.len() {
+        if messages[i]["role"] == "assistant"
+            && let Some(tool_calls) = messages[i]["tool_calls"].as_array()
+            && !tool_calls.is_empty()
+        {
+            let mut order_map = std::collections::HashMap::new();
+            for (idx, tc) in tool_calls.iter().enumerate() {
+                if let Some(id) = tc["id"].as_str() {
+                    let name = tc["function"]["name"].as_str().unwrap_or("").to_owned();
+                    order_map.insert(id.to_owned(), (idx, name));
+                }
+            }
+            let start = i + 1;
+            let mut end = start;
+            while end < messages.len() && messages[end]["role"] == "tool" {
+                end += 1;
+            }
+            if end > start {
+                let original_slice = messages[start..end].to_vec();
+                let mut sorted_slice = original_slice.clone();
+                sorted_slice.sort_by_key(|msg| {
+                    msg["tool_call_id"]
+                        .as_str()
+                        .and_then(|id| order_map.get(id))
+                        .map(|(idx, _)| *idx)
+                        .unwrap_or(usize::MAX)
+                });
+                for msg in sorted_slice.iter_mut() {
+                    if let Some(id) = msg["tool_call_id"].as_str()
+                        && let Some((_, name)) = order_map.get(id)
+                        && !name.is_empty()
+                        && msg["name"].as_str().is_none_or(str::is_empty)
+                    {
+                        msg["name"] = json!(name);
+                    }
+                }
+                if sorted_slice != original_slice {
+                    changes.push(Change::new(
+                        format!("/messages/{start}..{end}"),
+                        Some(json!(original_slice)),
+                        Some(json!(sorted_slice.clone())),
+                        "对齐并发工具响应顺序与工具名",
+                    ));
+                    messages[start..end].clone_from_slice(&sorted_slice);
+                }
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    changes
+}
+
 pub(crate) fn normalize_history(request: &mut Value) -> Vec<Change> {
     let mut changes = Vec::new();
     let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) else {

@@ -1170,6 +1170,42 @@ def run_zen_free_tier_cases(ctx):
     (ctx.output / "zen-free-multi-tool-concurrency.sse").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-multi-tool-concurrency-preserves-indices-and-names")
 
+    align_payload_tools = [
+        {"type": "function", "function": {"name": "list_dir", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "run_terminal_command", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "hashline_grep", "parameters": {"type": "object"}}},
+    ]
+    align_messages = [
+        {"role": "user", "content": "多工具并发执行"},
+        {
+            "role": "assistant",
+            "content": "发起调用",
+            "tool_calls": [
+                {"id": "call_list", "type": "function", "function": {"name": "list_dir", "arguments": "{\"path\":\".\"}"}},
+                {"id": "call_git", "type": "function", "function": {"name": "run_terminal_command", "arguments": "{\"command\":\"git status\"}"}},
+                {"id": "call_grep", "type": "function", "function": {"name": "hashline_grep", "arguments": "{\"pattern\":\"main\"}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_git", "content": "fatal: not a git repo"},
+        {"role": "tool", "tool_call_id": "call_grep", "content": "found: main.rs"},
+        {"role": "tool", "tool_call_id": "call_list", "content": "file1\nfile2"},
+    ]
+    status, _, wire, seen = free_post(
+        "zen-free-tool-align",
+        tools=align_payload_tools,
+        messages=align_messages,
+    )
+    assert status == 200
+    assert len(seen) == 1
+    sent_msgs = seen[0]["body"]["messages"]
+    tool_msgs = [m for m in sent_msgs if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["call_list", "call_git", "call_grep"]
+    assert [m["name"] for m in tool_msgs] == ["list_dir", "run_terminal_command", "hashline_grep"]
+    assert [m["content"] for m in tool_msgs] == ["file1\nfile2", "fatal: not a git repo", "found: main.rs"]
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-align')['id']}")
+    assert any("对齐并发工具响应顺序与工具名" in change["reason"] for change in detail["diff"]["request"])
+    ctx.passed("free-tool-responses-aligned-with-call-order")
+
     status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
     assert status == 200
     events = decode_sse(wire)
