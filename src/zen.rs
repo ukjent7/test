@@ -80,10 +80,10 @@ pub async fn sync_models_dev(client: reqwest::Client) {
             free.insert(id.clone());
         }
     }
-    if !free.is_empty() {
-        if let Ok(mut guard) = DYNAMIC_FREE_MODELS.write() {
-            *guard = free;
-        }
+    if !free.is_empty()
+        && let Ok(mut guard) = DYNAMIC_FREE_MODELS.write()
+    {
+        *guard = free;
     }
 }
 
