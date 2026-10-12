@@ -34,11 +34,40 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
             i += 1;
             continue;
         }
+        let original_tc = tool_calls.clone();
+        let has_invalid_tc = tool_calls.iter().any(|tc| {
+            tc["id"].as_str().is_none_or(str::is_empty)
+                || tc["function"]["name"].as_str().is_none_or(str::is_empty)
+        });
+        if has_invalid_tc {
+            let tc_array = messages[i]["tool_calls"].as_array_mut().unwrap();
+            tc_array.retain(|tc| {
+                tc["id"].as_str().is_some_and(|id| !id.is_empty())
+                    && tc["function"]["name"].as_str().is_some_and(|name| !name.is_empty())
+            });
+            changes.push(Change::new(
+                format!("/messages/{i}/tool_calls"),
+                Some(json!(original_tc)),
+                if tc_array.is_empty() {
+                    None
+                } else {
+                    Some(json!(tc_array.clone()))
+                },
+                "剔除无效空工具调用",
+            ));
+            if tc_array.is_empty() {
+                if let Some(obj) = messages[i].as_object_mut() {
+                    obj.remove("tool_calls");
+                }
+            }
+        }
         let mut order_map = HashMap::new();
-        for (idx, tc) in tool_calls.iter().enumerate() {
-            if let Some(id) = tc["id"].as_str() {
-                let name = tc["function"]["name"].as_str().unwrap_or("").to_owned();
-                order_map.insert(id.to_owned(), (idx, name));
+        if let Some(remaining_tc) = messages[i]["tool_calls"].as_array() {
+            for (idx, tc) in remaining_tc.iter().enumerate() {
+                if let Some(id) = tc["id"].as_str() {
+                    let name = tc["function"]["name"].as_str().unwrap_or("").to_owned();
+                    order_map.insert(id.to_owned(), (idx, name));
+                }
             }
         }
         let start = i + 1;
@@ -48,15 +77,23 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
         }
         if end > start {
             let original_slice = messages[start..end].to_vec();
-            let mut sorted_slice = original_slice.clone();
-            sorted_slice.sort_by_key(|msg| {
+            let mut valid_slice: Vec<_> = original_slice
+                .iter()
+                .filter(|msg| {
+                    msg["tool_call_id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty() && order_map.contains_key(id))
+                })
+                .cloned()
+                .collect();
+            valid_slice.sort_by_key(|msg| {
                 msg["tool_call_id"]
                     .as_str()
                     .and_then(|id| order_map.get(id))
                     .map(|(idx, _)| *idx)
                     .unwrap_or(usize::MAX)
             });
-            for msg in sorted_slice.iter_mut() {
+            for msg in valid_slice.iter_mut() {
                 let Some(id) = msg["tool_call_id"].as_str() else {
                     continue;
                 };
@@ -67,14 +104,15 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
                     msg["name"] = json!(name);
                 }
             }
-            if sorted_slice != original_slice {
+            if valid_slice != original_slice {
                 changes.push(Change::new(
                     format!("/messages/{start}..{end}"),
                     Some(json!(original_slice)),
-                    Some(json!(sorted_slice.clone())),
+                    Some(json!(valid_slice.clone())),
                     "对齐并发工具响应顺序与工具名",
                 ));
-                messages[start..end].clone_from_slice(&sorted_slice);
+                messages.splice(start..end, valid_slice.clone());
+                end = start + valid_slice.len();
             }
         }
         i = end;

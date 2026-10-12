@@ -233,6 +233,19 @@ impl StreamFix {
                 for mut call in calls.drain(..) {
                     let call_index = call["index"].as_u64().unwrap_or(0);
                     let mut name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                    let is_empty_call = name.is_empty()
+                        && call["id"].as_str().is_none_or(str::is_empty)
+                        && !self.call_map.contains_key(&(choice_index, call_index));
+                    if is_empty_call {
+                        self.stub_calls.insert((choice_index, call_index));
+                        changes.push(Change::new(
+                            format!("/choices/{choice_index}/delta/tool_calls/{call_index}"),
+                            Some(call),
+                            None,
+                            "丢弃空工具调用",
+                        ));
+                        continue;
+                    }
                     if self.tools.is_stub(&name) {
                         self.stub_calls.insert((choice_index, call_index));
                         changes.push(Change::new(
@@ -311,7 +324,7 @@ impl StreamFix {
                             call["function"]["arguments"] = json!("");
                         }
                     }
-                    let has_id = call.get("id").is_some_and(|id| !id.is_null());
+                    let has_id = call["id"].as_str().is_some_and(|id| !id.is_empty());
                     let has_args = call["function"]["arguments"]
                         .as_str()
                         .is_some_and(|args| !args.is_empty());
@@ -402,7 +415,7 @@ impl StreamFix {
         }
         for choice in choices.iter_mut() {
             if choice["finish_reason"] == "tool_calls"
-                && !self.tools.stubs.is_empty()
+                && (!self.tools.stubs.is_empty() || !self.stub_calls.is_empty())
                 && !self.calls_made
             {
                 choice["finish_reason"] = "stop".into();

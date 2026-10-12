@@ -139,6 +139,15 @@ impl ZenTools {
                             name = normalized;
                             call["function"]["name"] = json!(name);
                         }
+                        if name.is_empty() {
+                            changes.push(Change::new(
+                                format!("/choices/{position}/message/tool_calls/{call_position}"),
+                                Some(call),
+                                None,
+                                "丢弃空工具调用",
+                            ));
+                            continue;
+                        }
                         if self.is_stub(&name) {
                             changes.push(Change::new(
                                 format!("/choices/{position}/message/tool_calls/{call_position}"),
@@ -156,7 +165,7 @@ impl ZenTools {
                                     Some(json!(before)),
                                     Some(json!(&args_text)),
                                     "对齐工具参数别名",
-                                ));
+                                );
                                 call["function"]["arguments"] = json!(args_text);
                             }
                         }
@@ -167,7 +176,7 @@ impl ZenTools {
                     if emptied && let Some(message) = message.as_object_mut() {
                         message.remove("tool_calls");
                     }
-                    if choice["finish_reason"] == "tool_calls" && !self.stubs.is_empty() && emptied
+                    if choice["finish_reason"] == "tool_calls" && emptied
                     {
                         changes.push(Change::new(
                             format!("/choices/{position}/finish_reason"),

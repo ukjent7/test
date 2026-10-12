@@ -223,6 +223,14 @@ class MockUpstream(BaseHTTPRequestHandler):
             ]
             chunks = [c for c in chunks if c is not None]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+        elif case == "zen-free-empty-tool":
+            chunks = [
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Done."}}]},
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": None, "tool_calls": [{"index": 0, "id": "", "type": "function", "function": {"name": "", "arguments": ""}}]}}]},
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": None, "tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+            wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
         elif case == "zen-free-reasoning-alias":
             details = [{"type": "reasoning.text", "text": "thinking", "format": "unknown", "index": 0}]
             chunks = [
@@ -1006,6 +1014,16 @@ def run_zen_free_tier_cases(ctx):
     assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"bash", "read"}
     ctx.passed("free-stub-call-dropped-and-stop-reclassified")
 
+    status, _, wire, _ = free_post("zen-free-empty-tool", streaming=True)
+    assert status == 200
+    events = decode_sse(wire)
+    assert not any("tool_calls" in (event["choices"][0].get("delta") or {}) for event in events)
+    assert events[-1]["choices"][0]["finish_reason"] == "stop"
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-empty-tool')['id']}")
+    assert any(change["reason"] == "丢弃空工具调用" for change in detail["diff"]["response"])
+    assert any(change["reason"] == "无真实工具调用，改判普通结束" for change in detail["diff"]["response"])
+    ctx.passed("free-empty-tool-call-dropped-and-stop-reclassified")
+
     status, _, wire, seen = free_post(
         "zen-free-client-tool",
         streaming=True,
@@ -1261,6 +1279,34 @@ def run_zen_free_tier_cases(ctx):
     _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-align-free')['id']}")
     assert any("对齐并发工具响应顺序与工具名" in change["reason"] for change in detail["diff"]["request"])
     ctx.passed("free-tool-responses-aligned-with-call-order")
+
+    empty_tool_messages = [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": "thinking done",
+            "tool_calls": [
+                {"id": "", "type": "function", "function": {"name": "", "arguments": "{}"}},
+                {"id": "call_valid", "type": "function", "function": {"name": "read_file", "arguments": '{"path":"README.md"}'}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "", "content": "Failed to parse arguments for tool ``: Tool not found:"},
+        {"role": "tool", "tool_call_id": "call_valid", "content": "file contents"},
+    ]
+    status, _, _, seen = free_post(
+        "zen-free-clean-empty-tool",
+        messages=empty_tool_messages,
+    )
+    assert status == 200
+    assert len(seen) == 1
+    sent_msgs = seen[0]["body"]["messages"]
+    asst_msg = next(m for m in sent_msgs if m.get("role") == "assistant")
+    assert [tc["id"] for tc in asst_msg["tool_calls"]] == ["call_valid"]
+    tool_msgs = [m for m in sent_msgs if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["call_valid"]
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-clean-empty-tool')['id']}")
+    assert any(change["reason"] == "剔除无效空工具调用" for change in detail["diff"]["request"])
+    ctx.passed("free-empty-tool-messages-pruned-from-request")
 
     status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
     assert status == 200
