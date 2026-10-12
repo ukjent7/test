@@ -1294,7 +1294,7 @@ def run_zen_free_tier_cases(ctx):
         {"role": "tool", "tool_call_id": "call_valid", "content": "file contents"},
     ]
     status, _, _, seen = free_post(
-        "zen-free-clean-empty-tool",
+        "zen-free-clean-empty-tool-free",
         messages=empty_tool_messages,
     )
     assert status == 200
@@ -1304,7 +1304,7 @@ def run_zen_free_tier_cases(ctx):
     assert [tc["id"] for tc in asst_msg["tool_calls"]] == ["call_valid"]
     tool_msgs = [m for m in sent_msgs if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in tool_msgs] == ["call_valid"]
-    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-clean-empty-tool')['id']}")
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-clean-empty-tool-free')['id']}")
     assert any(change["reason"] == "剔除无效空工具调用" for change in detail["diff"]["request"])
     ctx.passed("free-empty-tool-messages-pruned-from-request")
 
