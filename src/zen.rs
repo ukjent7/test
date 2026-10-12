@@ -48,7 +48,7 @@ pub fn is_free_model(model: &str) -> bool {
 }
 
 /// 尝试从 models.dev 异步同步 OpenCode 的免费模型（输入/输出均为 0.00）。
-pub async fn sync_models_dev(client: &reqwest::Client) {
+pub async fn sync_models_dev(client: reqwest::Client) {
     let url = "https://models.dev/api.json";
     let Ok(response) = client
         .get(url)
