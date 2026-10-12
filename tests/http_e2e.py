@@ -1013,9 +1013,12 @@ def run_zen_free_tier_cases(ctx):
     status, _, wire, _ = free_post("zen-free-tool-restart", streaming=True)
     assert status == 200
     events = decode_sse(wire)
-    args = [event["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] for event in events[:9]]
-    assert args == ["", "", "", "", "", "", "", "", '{"path": "README.md"}'], args
-    assert events[9]["choices"][0]["finish_reason"] == "tool_calls"
+    tool_events = [e for e in events if "tool_calls" in (e["choices"][0].get("delta") or {})]
+    assert len(tool_events) == 2, f"expected only declaration and complete args, got {len(tool_events)}"
+    assert tool_events[0]["choices"][0]["delta"]["tool_calls"][0]["function"] == {"name": "read_file", "arguments": ""}
+    assert tool_events[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == '{"path": "README.md"}'
+    assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    assert len(events) == 3, f"expected 3 events in total, got {len(events)}"
     _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-restart')['id']}")
     assert len([change for change in detail["diff"]["response"] if change["reason"] == "丢弃重试前残缺的工具参数"]) == 2
     (ctx.output / "zen-free-tool-restart.sse").write_text(wire.decode(), encoding="utf-8")

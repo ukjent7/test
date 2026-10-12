@@ -268,7 +268,8 @@ impl StreamFix {
                         .call_args
                         .entry((choice_index, client_index))
                         .or_default();
-                    if !name.is_empty() {
+                    let has_name = !name.is_empty();
+                    if has_name {
                         entry.name = name;
                     }
                     if entry.flushed {
@@ -290,7 +291,13 @@ impl StreamFix {
                             call["function"]["arguments"] = json!("");
                         }
                     }
-                    kept.push(call);
+                    let has_id = call.get("id").is_some_and(|id| !id.is_null());
+                    let has_args = call["function"]["arguments"]
+                        .as_str()
+                        .is_some_and(|args| !args.is_empty());
+                    if has_id || has_name || has_args {
+                        kept.push(call);
+                    }
                 }
                 *calls = kept;
                 if calls.is_empty()
