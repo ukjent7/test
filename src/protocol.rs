@@ -43,7 +43,9 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
             let tc_array = messages[i]["tool_calls"].as_array_mut().unwrap();
             tc_array.retain(|tc| {
                 tc["id"].as_str().is_some_and(|id| !id.is_empty())
-                    && tc["function"]["name"].as_str().is_some_and(|name| !name.is_empty())
+                    && tc["function"]["name"]
+                        .as_str()
+                        .is_some_and(|name| !name.is_empty())
             });
             changes.push(Change::new(
                 format!("/messages/{i}/tool_calls"),

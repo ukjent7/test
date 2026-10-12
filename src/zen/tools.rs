@@ -176,8 +176,7 @@ impl ZenTools {
                     if emptied && let Some(message) = message.as_object_mut() {
                         message.remove("tool_calls");
                     }
-                    if choice["finish_reason"] == "tool_calls" && emptied
-                    {
+                    if choice["finish_reason"] == "tool_calls" && emptied {
                         changes.push(Change::new(
                             format!("/choices/{position}/finish_reason"),
                             Some(json!("tool_calls")),
