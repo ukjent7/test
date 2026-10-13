@@ -14,8 +14,7 @@ use crate::app::Change;
 const ZEN_TOOLS: [&str; 2] = ["bash", "read"];
 /// 桩工具描述：避免使用 "Never call this tool" 等强硬警示词，防止推理模型在思考链（CoT）中
 /// 将其误解为与用户任务冲突的安全禁令，导致消耗额外思考 Token 甚至陷入目标混乱。
-const STUB_DESCRIPTION: &str =
-    "Internal runtime compatibility placeholder for OpenCode host environment. Inactive; use primary session tools instead.";
+const STUB_DESCRIPTION: &str = "Internal runtime compatibility placeholder for OpenCode host environment. Inactive; use primary session tools instead.";
 
 /// Zen 免费层的工具整形结果：补齐缺失的 bash/read 桩工具。
 #[derive(Default)]

@@ -63,6 +63,22 @@ fn bypass_lane(request: &history::Snapshot) -> Option<String> {
     header("x-grok-conv-id")
         .and_then(label)
         .or_else(|| header("x-grok-req-id").and_then(label))
+        .or_else(|| {
+            // Grok 新建会话/派生子代理时的初始标题生成请求常将 conv-id 置空，按工具名显式识别旁路。
+            if request.body.windows(15).any(|w| w == b"\"session_title\"")
+                && let Ok(val) = serde_json::from_slice::<Value>(&request.body)
+                && (val["tools"].as_array().is_some_and(|tools| {
+                    tools.iter().any(|t| {
+                        t["function"]["name"] == "session_title" || t["name"] == "session_title"
+                    })
+                }) || val["tool_choice"]["function"]["name"] == "session_title"
+                    || val["tool_choice"] == "session_title")
+            {
+                Some("session-title".to_owned())
+            } else {
+                None
+            }
+        })
 }
 
 #[derive(Default, Serialize)]

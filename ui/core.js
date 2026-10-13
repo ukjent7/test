@@ -5,8 +5,8 @@ export const providerName = provider => ({stepfun: 'StepFun', opencode: 'OpenCod
 // 旁路请求种类 → 界面文案;未知种类显示客户端原始标签。
 export const laneName = lane => ({'memory-capture': '记忆采集', dream: '记忆整理', 'dream-v2': '记忆整理 v2',
   flush: '记忆落盘', 'turn-summary': '轮次摘要', recap: '回顾', btw: '顺带回顾', 'title-refresh': '标题刷新',
-  compact: '历史压缩', promptsuggest: '提示建议', 'perm-classifier': '权限分类', 'trace-classifier': '轨迹分类',
-  'goal-eval': '目标评估'}[lane] || lane);
+  'session-title': '初始标题', compact: '历史压缩', promptsuggest: '提示建议', 'perm-classifier': '权限分类',
+  'trace-classifier': '轨迹分类', 'goal-eval': '目标评估'}[lane] || lane);
 
 export function element(tag, className, text) {
   const node = document.createElement(tag);
