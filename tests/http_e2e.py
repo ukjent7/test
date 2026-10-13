@@ -249,6 +249,7 @@ class MockUpstream(BaseHTTPRequestHandler):
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "reasoning": "thinking", "reasoning_details": details}}]},
                 {"choices": [{"index": 0, "delta": {"reasoning": ""}}]},
                 {"choices": [{"index": 0, "delta": {"reasoning": "upstream-dup", "reasoning_content": "kept"}}]},
+                {"choices": [{"index": 0, "delta": {"reasoning_text": "fallback-text"}}]},
                 {"choices": [{"index": 0, "delta": {"content": "visible"}, "finish_reason": "stop"}]},
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
@@ -1324,16 +1325,20 @@ def run_zen_free_tier_cases(ctx):
     assert status == 200
     assert len(seen) == 1
     sent_msgs = seen[0]["body"]["messages"]
+    asst_msg = next(m for m in sent_msgs if m.get("role") == "assistant")
+    assert asst_msg.get("reasoning_content") == ""
     tool_msgs = [m for m in sent_msgs if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in tool_msgs] == ["call_list", "call_git", "call_grep"]
     assert [m["name"] for m in tool_msgs] == ["list_dir", "run_terminal_command", "hashline_grep"]
     assert [m["content"] for m in tool_msgs] == ["file1\nfile2", "fatal: not a git repo", "found: main.rs"]
     _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-tool-align-free')['id']}")
     assert any("对齐并发工具响应顺序与工具名" in change["reason"] for change in detail["diff"]["request"])
+    assert any("补齐思考模型助手工具调用缺失的 reasoning_content" in change["reason"] for change in detail["diff"]["request"])
     ctx.passed("free-tool-responses-aligned-with-call-order")
 
     empty_tool_messages = [
         {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": ""},
         {
             "role": "assistant",
             "content": "thinking done",
@@ -1352,12 +1357,15 @@ def run_zen_free_tier_cases(ctx):
     assert status == 200
     assert len(seen) == 1
     sent_msgs = seen[0]["body"]["messages"]
-    asst_msg = next(m for m in sent_msgs if m.get("role") == "assistant")
+    asst_msgs = [m for m in sent_msgs if m.get("role") == "assistant"]
+    assert len(asst_msgs) == 1
+    asst_msg = asst_msgs[0]
     assert [tc["id"] for tc in asst_msg["tool_calls"]] == ["call_valid"]
     tool_msgs = [m for m in sent_msgs if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in tool_msgs] == ["call_valid"]
     _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-clean-empty-tool-free')['id']}")
     assert any(change["reason"] == "剔除无效空工具调用" for change in detail["diff"]["request"])
+    assert any(change["reason"] == "移除空助手消息" for change in detail["diff"]["request"])
     ctx.passed("free-empty-tool-messages-pruned-from-request")
 
     status, _, wire, _ = free_post("zen-free-reasoning-alias", streaming=True)
@@ -1368,8 +1376,9 @@ def run_zen_free_tier_cases(ctx):
     assert delta["reasoning_details"][0]["text"] == "thinking"
     assert events[1]["choices"][0]["delta"] == {"reasoning": ""}
     assert events[2]["choices"][0]["delta"] == {"reasoning": "upstream-dup", "reasoning_content": "kept"}
-    assert events[3]["choices"][0]["delta"] == {"content": "visible"}
-    assert events[3]["choices"][0]["finish_reason"] == "stop"
+    assert events[3]["choices"][0]["delta"] == {"reasoning_content": "fallback-text"} and "reasoning_text" not in events[3]["choices"][0]["delta"]
+    assert events[4]["choices"][0]["delta"] == {"content": "visible"}
+    assert events[4]["choices"][0]["finish_reason"] == "stop"
     (ctx.output / "zen-free-reasoning-alias.sse").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-reasoning-alias-renamed-to-reasoning-content")
 

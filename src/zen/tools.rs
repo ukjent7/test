@@ -44,7 +44,13 @@ impl ZenTools {
     /// 对齐常见参数别名（例如模型习惯输出 file_path，但客户端仅接受 target_file）。
     pub(crate) fn normalize_args(&self, name: &str, text: &mut String) -> Option<String> {
         let schema = self.schemas.get(name)?;
-        let mut value = serde_json::from_str::<Value>(text).ok()?;
+        let mut value = match serde_json::from_str::<Value>(text) {
+            Ok(v) => v,
+            Err(_) => {
+                let repaired = markup::repair_json(text);
+                serde_json::from_str::<Value>(&repaired).ok()?
+            }
+        };
         let object = value.as_object_mut()?;
         let mut changed = false;
         const ALIASES: &[(&str, &[&str])] = &[
@@ -97,7 +103,7 @@ impl ZenTools {
                 }
             }
         }
-        if changed {
+        if changed || serde_json::from_str::<Value>(text).is_err() {
             let serialized = serde_json::to_string(&value).ok()?;
             let old = std::mem::replace(text, serialized);
             Some(old)

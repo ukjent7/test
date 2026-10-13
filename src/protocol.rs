@@ -72,6 +72,20 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
                 }
             }
         }
+        // 学习 pi 的思考模型重放经验：含 tool_calls 的 assistant 消息若缺失
+        // reasoning_content 则补齐空串，防止小米 MiMo / DeepSeek 等上游报 400 校验异常。
+        if !order_map.is_empty()
+            && (messages[i].get("reasoning_content").is_none()
+                || messages[i]["reasoning_content"].is_null())
+        {
+            messages[i]["reasoning_content"] = json!("");
+            changes.push(Change::new(
+                format!("/messages/{i}/reasoning_content"),
+                None,
+                Some(json!("")),
+                "补齐思考模型助手工具调用缺失的 reasoning_content",
+            ));
+        }
         let start = i + 1;
         let mut end = start;
         while end < messages.len() && messages[end]["role"] == "tool" {
@@ -152,13 +166,35 @@ pub(crate) fn normalize_history(request: &mut Value) -> Vec<Change> {
             target_message += 1;
             return true;
         }
+        let has_tool_calls = message["tool_calls"]
+            .as_array()
+            .is_some_and(|calls| !calls.is_empty());
         let Some(blocks) = message["content"].as_array() else {
+            // 学习 pi 的空助手消息修剪经验：对非数组 content（Chat Completions 格式），
+            // 若 content 为空且无 tool_calls，直接剔除，避免上游 400 拒收。
+            let empty_text = message["content"].is_null()
+                || message["content"]
+                    .as_str()
+                    .is_some_and(|s| s.trim().is_empty());
+            if !has_tool_calls && empty_text {
+                changes.push(Change::new(
+                    path,
+                    Some(message.clone()),
+                    None,
+                    "移除空助手消息",
+                ));
+                return false;
+            }
             target_message += 1;
             return true;
         };
-        if blocks.iter().all(|block| {
-            unsigned_thinking(block) && block["thinking"].as_str().unwrap_or("").trim().is_empty()
-        }) {
+        if !has_tool_calls
+            && (blocks.is_empty()
+                || blocks.iter().all(|block| {
+                    unsigned_thinking(block)
+                        && block["thinking"].as_str().unwrap_or("").trim().is_empty()
+                }))
+        {
             changes.push(Change::new(
                 path,
                 Some(message.clone()),

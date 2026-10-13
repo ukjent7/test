@@ -162,9 +162,7 @@ async fn forward(
         client,
     } = upstream;
     let anthropic = endpoint == "messages";
-    if anthropic {
-        trace.diff.request = normalize_history(&mut request);
-    }
+    trace.diff.request = normalize_history(&mut request);
     trace
         .diff
         .request

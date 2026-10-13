@@ -75,23 +75,106 @@ pub(crate) fn typed_value(schema: &Value, key: &str, raw: &str) -> Value {
     }
 }
 
-/// Zen 免费层用 `reasoning` 承载思维链，客户端只认 `reasoning_content`：
-/// 搬到标准字段名并删掉原名；空串或标准字段已有值时不动。
+/// 修复损坏或非标的 JSON 字符串字面量（学习 pi 的 repairJson 成熟经验）：
+/// - 转义字符串内的裸控制字符（换行、回车、制表符等）；
+/// - 修复非法或孤立的反斜杠转义（如 Windows 路径中的 `\p` 或正则中的 `\d`）。
+pub(crate) fn repair_json(raw: &str) -> String {
+    let mut repaired = String::with_capacity(raw.len());
+    let mut in_string = false;
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !in_string {
+            repaired.push(c);
+            if c == '"' {
+                in_string = true;
+            }
+            continue;
+        }
+        if c == '"' {
+            repaired.push(c);
+            in_string = false;
+            continue;
+        }
+        if c == '\\' {
+            let Some(&next) = chars.peek() else {
+                repaired.push_str("\\\\");
+                continue;
+            };
+            if matches!(next, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') {
+                repaired.push('\\');
+                repaired.push(next);
+                chars.next();
+                continue;
+            }
+            if next == 'u' {
+                let peek: Vec<char> = chars.clone().take(5).collect();
+                if peek.len() == 5 && peek[1..5].iter().all(|h| h.is_ascii_hexdigit()) {
+                    repaired.push('\\');
+                    repaired.push('u');
+                    chars.next();
+                    for _ in 0..4 {
+                        if let Some(h) = chars.next() {
+                            repaired.push(h);
+                        }
+                    }
+                    continue;
+                }
+            }
+            repaired.push_str("\\\\");
+            continue;
+        }
+        if (c as u32) <= 0x1f {
+            match c {
+                '\n' => repaired.push_str("\\n"),
+                '\r' => repaired.push_str("\\r"),
+                '\t' => repaired.push_str("\\t"),
+                '\x08' => repaired.push_str("\\b"),
+                '\x0c' => repaired.push_str("\\f"),
+                _ => {
+                    use std::fmt::Write;
+                    let _ = write!(repaired, "\\u{:04x}", c as u32);
+                }
+            }
+        } else {
+            repaired.push(c);
+        }
+    }
+    repaired
+}
+
+/// 学习 pi 的思维链优先级探测经验（reasoning_content > reasoning > reasoning_text）：
+/// 客户端只认 reasoning_content，优先使用首个非空思维链字段并统一为标准字段名，
+/// 剔除原别名字段；空串或标准字段已有非空值时不动。
 /// 改动只记路径不搬正文，避免把思维链复制进差异视图。
 pub(crate) fn rename_reasoning(delta: &mut Value, choice_index: u64, changes: &mut Vec<Change>) {
-    let Some(text) = delta.get("reasoning").and_then(Value::as_str) else {
+    let taken = matches!(
+        delta.get("reasoning_content"),
+        Some(value) if !value.is_null() && value.as_str().is_some_and(|s| !s.is_empty())
+    );
+    if taken {
+        return;
+    }
+    let (source_field, text) = if let Some(text) = delta
+        .get("reasoning")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        ("reasoning", text)
+    } else if let Some(text) = delta
+        .get("reasoning_text")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        ("reasoning_text", text)
+    } else {
         return;
     };
-    let taken = matches!(delta.get("reasoning_content"), Some(value) if !value.is_null());
-    if text.is_empty() || taken {
-        return;
-    }
     delta["reasoning_content"] = json!(text);
     if let Some(object) = delta.as_object_mut() {
-        object.remove("reasoning");
+        object.remove(source_field);
     }
     changes.push(Change::new(
-        format!("/choices/{choice_index}/delta/reasoning"),
+        format!("/choices/{choice_index}/delta/{source_field}"),
         None,
         None,
         "思维链字段回改为 reasoning_content",

@@ -70,10 +70,14 @@ impl StreamFix {
         self.markup.is_some()
     }
 
-    /// 上游参数要同时满足 JSON 完整与工具必填字段才下发：原生流经常
+    /// 上游参数要同时满足 JSON 完整（支持容错修复）与工具必填字段才下发：原生流经常
     /// 缺字段或串台，仅 JSON 合法不足以让客户端接受。
     fn args_valid(schemas: &BTreeMap<String, Value>, name: &str, text: &str) -> bool {
-        let Ok(value) = serde_json::from_str::<Value>(text) else {
+        let value = serde_json::from_str::<Value>(text).ok().or_else(|| {
+            let repaired = markup::repair_json(text);
+            serde_json::from_str::<Value>(&repaired).ok()
+        });
+        let Some(value) = value else {
             return false;
         };
         let Some(schema) = schemas.get(name) else {
@@ -353,6 +357,12 @@ impl StreamFix {
                         }
                         if Self::args_valid(&self.tools.schemas, &entry.name, &entry.text) {
                             entry.flushed = true;
+                            if serde_json::from_str::<Value>(&entry.text).is_err() {
+                                let repaired = markup::repair_json(&entry.text);
+                                if serde_json::from_str::<Value>(&repaired).is_ok() {
+                                    entry.text = repaired;
+                                }
+                            }
                             call["function"]["arguments"] = json!(entry.text.clone());
                         } else {
                             call["function"]["arguments"] = json!("");
@@ -472,6 +482,12 @@ impl StreamFix {
             for ((call_choice, client_index), entry) in self.call_args.iter_mut() {
                 if *call_choice != choice_index || entry.flushed || entry.text.is_empty() {
                     continue;
+                }
+                if serde_json::from_str::<Value>(&entry.text).is_err() {
+                    let repaired = markup::repair_json(&entry.text);
+                    if serde_json::from_str::<Value>(&repaired).is_ok() {
+                        entry.text = repaired;
+                    }
                 }
                 if let Some(before) = self.tools.normalize_args(&entry.name, &mut entry.text) {
                     changes.push(Change::new(
