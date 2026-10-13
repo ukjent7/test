@@ -310,7 +310,7 @@ pub(crate) fn normalize_sse(
 ) -> (Vec<u8>, Vec<Change>) {
     let has_tool_calls = frame.windows(12).any(|w| w == b"\"tool_calls\"");
     let has_usage = frame.windows(7).any(|w| w == b"\"usage\"");
-    let has_reasoning = frame.windows(11).any(|w| w == b"\"reasoning\"");
+    let has_reasoning = frame.windows(10).any(|w| w == b"\"reasoning");
     let has_markup = frame.windows(11).any(|w| w == b"<tool_call>");
     let markup_pending = zen.as_ref().is_some_and(|z| z.has_pending_markup());
     if endpoint != "messages"
