@@ -163,7 +163,8 @@ class MockUpstream(BaseHTTPRequestHandler):
         if len(session) == 30 and session.startswith("ses_"):
             try:
                 decoded_ts = ((~int(session[4:16], 16)) & 0xFFFF_FFFF_FFFF) >> 12
-                valid_descending = abs(time.time() * 1000 - decoded_ts) < 86400000
+                now_36 = int(time.time() * 1000) & 0xF_FFFF_FFFF
+                valid_descending = abs(now_36 - decoded_ts) < 86400000
             except ValueError:
                 pass
         if not request.get("stream") or not set(("bash", "read")) <= names or not valid_descending or case == "zen-free-always-denied":
@@ -683,12 +684,13 @@ def run_zen_session_cases(ctx):
         assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-session"])
         assert re.fullmatch(r"msg_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-request"])
         session_hex = forwarded["x-opencode-session"][4:16]
+        now_36 = int(time.time() * 1000) & 0xF_FFFF_FFFF
         if forwarded["x-opencode-session"] != canonical:
             decoded_ts = ((~int(session_hex, 16)) & 0xFFFF_FFFF_FFFF) >> 12
-            assert abs(time.time() * 1000 - decoded_ts) < 60000, f"invalid session timestamp: {decoded_ts}"
+            assert abs(now_36 - decoded_ts) < 60000, f"invalid session timestamp: {decoded_ts}"
         request_hex = forwarded["x-opencode-request"][4:16]
         decoded_req_ts = (int(request_hex, 16) & 0xFFFF_FFFF_FFFF) >> 12
-        assert abs(time.time() * 1000 - decoded_req_ts) < 60000, f"invalid request timestamp: {decoded_req_ts}"
+        assert abs(now_36 - decoded_req_ts) < 60000, f"invalid request timestamp: {decoded_req_ts}"
         assert forwarded["x-opencode-client"] == "cli"
         assert forwarded["x-opencode-project"] == "global"
         assert forwarded["x-api-key"] == "dummy-token"
