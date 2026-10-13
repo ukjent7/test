@@ -5,7 +5,7 @@ mod tools;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    hash::{DefaultHasher, Hash, Hasher, RandomState},
+    hash::{BuildHasher, DefaultHasher, Hash, Hasher, RandomState},
     sync::{Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
