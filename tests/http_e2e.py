@@ -158,7 +158,15 @@ class MockUpstream(BaseHTTPRequestHandler):
 
     def _handle_zen_free_post(self, case, _body, request):
         names = {tool.get("function", tool).get("name") for tool in request.get("tools", [])}
-        if not request.get("stream") or not set(("bash", "read")) <= names or case == "zen-free-always-denied":
+        session = self.headers.get("x-opencode-session", "")
+        valid_descending = False
+        if len(session) == 30 and session.startswith("ses_"):
+            try:
+                decoded_ts = ((~int(session[4:16], 16)) & 0xFFFF_FFFF_FFFF) >> 12
+                valid_descending = abs(time.time() * 1000 - decoded_ts) < 86400000
+            except ValueError:
+                pass
+        if not request.get("stream") or not set(("bash", "read")) <= names or not valid_descending or case == "zen-free-always-denied":
             wire = b'{"type":"error","error":{"type":"FreeTierError","message":"fixture"}}'
             self.send_response(403)
             self.send_header("Content-Type", "application/json")
@@ -639,6 +647,7 @@ def run_messages_protocol_cases(ctx):
 def run_zen_session_cases(ctx):
     """Zen session preservation, header normalization, and routing switchbacks."""
     ctx.set_upstream("http://opencode.ai/zen/v1/")
+    canonical = "ses_abcdef123456aB0Cd1Ef2Gh3Ij"
     dirty = {
         "User-Agent": "grok-build/test",
         "Cookie": "client-cookie",
@@ -673,6 +682,13 @@ def run_zen_session_cases(ctx):
         assert forwarded["user-agent"] == "opencode/1.18.34"
         assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-session"])
         assert re.fullmatch(r"msg_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-request"])
+        session_hex = forwarded["x-opencode-session"][4:16]
+        if forwarded["x-opencode-session"] != canonical:
+            decoded_ts = ((~int(session_hex, 16)) & 0xFFFF_FFFF_FFFF) >> 12
+            assert abs(time.time() * 1000 - decoded_ts) < 60000, f"invalid session timestamp: {decoded_ts}"
+        request_hex = forwarded["x-opencode-request"][4:16]
+        decoded_req_ts = (int(request_hex, 16) & 0xFFFF_FFFF_FFFF) >> 12
+        assert abs(time.time() * 1000 - decoded_req_ts) < 60000, f"invalid request timestamp: {decoded_req_ts}"
         assert forwarded["x-opencode-client"] == "cli"
         assert forwarded["x-opencode-project"] == "global"
         assert forwarded["x-api-key"] == "dummy-token"
@@ -691,7 +707,6 @@ def run_zen_session_cases(ctx):
     assert session == again, "explicit session must survive history changes"
     other, _ = zen_post("zen-json-other-session", {"X-Session-Id": "another-session", "x-session-affinity": "another-session"})
     assert session != other
-    canonical = "ses_abcdef123456aB0Cd1Ef2Gh3Ij"
     preserved, _ = zen_post("zen-json-canonical", {"x-opencode-session": canonical})
     assert preserved == canonical
     ctx.release.clear()

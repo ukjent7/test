@@ -4,10 +4,10 @@ mod stream;
 mod tools;
 
 use std::{
-    collections::BTreeSet,
-    hash::{DefaultHasher, Hash, Hasher},
-    sync::RwLock,
-    time::{SystemTime, UNIX_EPOCH},
+    collections::{BTreeMap, BTreeSet},
+    hash::{DefaultHasher, Hash, Hasher, RandomState},
+    sync::{Mutex, RwLock},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::http::{HeaderMap, header};
@@ -141,6 +141,9 @@ pub fn prepare_headers(
     (source, session)
 }
 
+static ID_STATE: Mutex<(u64, u64)> = Mutex::new((0, 0));
+static SESSION_CACHE: Mutex<BTreeMap<u64, (String, Instant)>> = Mutex::new(BTreeMap::new());
+
 fn session_id(headers: &HeaderMap, request: &Value) -> (&'static str, String) {
     let identity = cache::identity(headers, request);
     if let Some((source, signal)) = identity
@@ -182,34 +185,69 @@ fn session_id(headers: &HeaderMap, request: &Value) -> (&'static str, String) {
         &first_turn,
     ));
     signal.hash(&mut hash);
-    let time = hash.finish();
-    "ses".hash(&mut hash);
-    (source, opencode_id("ses", time, hash.finish()))
+    let key = hash.finish();
+    let session = if let Ok(mut cache) = SESSION_CACHE.lock() {
+        if let Some((existing, last_used)) = cache.get_mut(&key)
+            && last_used.elapsed() < Duration::from_secs(1800)
+        {
+            *last_used = Instant::now();
+            existing.clone()
+        } else {
+            let id = opencode_id("ses", true);
+            if cache.len() >= 1000 {
+                cache.retain(|_, (_, last)| last.elapsed() < Duration::from_secs(1800));
+                if cache.len() >= 1000
+                    && let Some(first_key) = cache.keys().next().copied()
+                {
+                    cache.remove(&first_key);
+                }
+            }
+            cache.insert(key, (id.clone(), Instant::now()));
+            id
+        }
+    } else {
+        opencode_id("ses", true)
+    };
+    (source, session)
 }
 
 /// 每次上游请求一个 msg_ 形态的轮次 id，如同 OpenCode 自己发送。
 fn turn_id() -> String {
-    let mut hash = DefaultHasher::new();
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|time| time.as_nanos() as u64)
-        .unwrap_or(0)
-        .hash(&mut hash);
-    let time = hash.finish();
-    "msg".hash(&mut hash);
-    opencode_id("msg", time, hash.finish())
+    opencode_id("msg", false)
 }
 
-fn opencode_id(prefix: &str, time: u64, random: u64) -> String {
+fn opencode_id(prefix: &str, descending: bool) -> String {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|time| time.as_millis() as u64)
+        .unwrap_or(0);
+    let counter = ID_STATE
+        .lock()
+        .map(|mut state| {
+            if state.0 != now_ms {
+                state.0 = now_ms;
+                state.1 = 0;
+            }
+            state.1 += 1;
+            state.1 & 0x0fff
+        })
+        .unwrap_or(1);
+    let current = (now_ms * 4096).wrapping_add(counter.max(1));
+    let value = if descending {
+        !current & 0xffff_ffff_ffff
+    } else {
+        current & 0xffff_ffff_ffff
+    };
     let mut suffix = [b'0'; 14];
-    let mut random = random;
-    for byte in suffix.iter_mut().rev() {
-        *byte = BASE62[(random % 62) as usize];
-        random /= 62;
+    let state = RandomState::new();
+    let b1 = state.hash_one(now_ms).to_ne_bytes();
+    let b2 = state.hash_one(counter).to_ne_bytes();
+    for (i, byte) in suffix.iter_mut().enumerate() {
+        let raw = if i < 8 { b1[i] } else { b2[i - 8] };
+        *byte = BASE62[(raw % 62) as usize];
     }
     format!(
-        "{prefix}_{:012x}{}",
-        time & 0xffff_ffff_ffff,
+        "{prefix}_{value:012x}{}",
         std::str::from_utf8(&suffix).unwrap()
     )
 }
