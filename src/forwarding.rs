@@ -78,6 +78,64 @@ async fn forward(
         .trim_start_matches("/v1")
         .trim_start_matches('/')
         .to_owned();
+    if is_session_title_request(&request) {
+        trace.status = 200;
+        trace.result = "完成";
+        let client_streaming = request["stream"].as_bool().unwrap_or(false);
+        let anthropic = endpoint == "messages";
+        let response = if anthropic {
+            if client_streaming {
+                let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_title_skip\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"session-title\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+                    .header(header::CACHE_CONTROL, "no-cache")
+                    .body(Body::from(sse))
+                    .unwrap()
+            } else {
+                let json = json!({
+                    "id": "msg_title_skip",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": "session-title",
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 0, "output_tokens": 0}
+                });
+                Json(json).into_response()
+            }
+        } else if client_streaming {
+            let sse = "data: {\"id\":\"chatcmpl-title-skip\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"session-title\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(Body::from(sse))
+                .unwrap()
+        } else {
+            let json = json!({
+                "id": "chatcmpl-title-skip",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "session-title",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": ""
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                }
+            });
+            Json(json).into_response()
+        };
+        return Ok(response);
+    }
     let [stepfun, opencode] = gateway.upstreams(&endpoint).inspect_err(|error| {
         trace.status = error.0.as_u16();
     })?;
@@ -523,3 +581,20 @@ fn is_allowed_opencode_model(wire_model: &str) -> bool {
         )
         || wire_model.starts_with("zen-")
 }
+
+fn is_session_title_request(request: &Value) -> bool {
+    let has_session_title_tool = request["tools"].as_array().is_some_and(|tools| {
+        tools.iter().any(|t| {
+            t["function"]["name"] == "session_title" || t["name"] == "session_title"
+        })
+    });
+    let has_session_title_choice = request["tool_choice"]["function"]["name"] == "session_title"
+        || request["tool_choice"]["name"] == "session_title"
+        || request["tool_choice"] == "session_title";
+    has_session_title_choice
+        || (has_session_title_tool
+            && request["tools"]
+                .as_array()
+                .is_some_and(|tools| tools.len() == 1))
+}
+

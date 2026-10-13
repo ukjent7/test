@@ -72,6 +72,7 @@ fn bypass_lane(request: &history::Snapshot) -> Option<String> {
                         t["function"]["name"] == "session_title" || t["name"] == "session_title"
                     })
                 }) || val["tool_choice"]["function"]["name"] == "session_title"
+                    || val["tool_choice"]["name"] == "session_title"
                     || val["tool_choice"] == "session_title")
             {
                 Some("session-title".to_owned())
