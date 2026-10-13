@@ -5,11 +5,17 @@ use serde_json::{Value, json};
 use super::markup;
 use crate::app::Change;
 
-/// Zen 免费层只服务 OpenCode 自身：请求须流式，且提供名为 bash 与 read 的
-/// 工具（小写，仅按名匹配）。客户端已有工具完整保留；缺的补一个永远不该
-/// 被调用的桩，模型调用桩的内容会被丢弃。
+/// 【硬性协议门槛说明】Zen 免费层只服务 OpenCode 自身：服务端强制校验请求必须为流式，
+/// 且 tools 列表中必须提供名为 bash 与 read 的工具（小写，仅按名匹配），若缺少任何一个，
+/// 服务端将直接返回 403 FreeTierError 拒绝服务。
+///
+/// 因此，为请求补齐缺失的 bash/read 虚拟桩工具是满足上游准入的刚性前置要求，绝对不可精简或
+/// 判定为冗余。客户端已有工具完整保留；缺的补齐兼容占位桩，模型若调用桩工具其内容会被安全丢弃。
 const ZEN_TOOLS: [&str; 2] = ["bash", "read"];
-const STUB_DESCRIPTION: &str = "Not available in this session. Never call this tool.";
+/// 桩工具描述：避免使用 "Never call this tool" 等强硬警示词，防止推理模型在思考链（CoT）中
+/// 将其误解为与用户任务冲突的安全禁令，导致消耗额外思考 Token 甚至陷入目标混乱。
+const STUB_DESCRIPTION: &str =
+    "Internal runtime compatibility placeholder for OpenCode host environment. Inactive; use primary session tools instead.";
 
 /// Zen 免费层的工具整形结果：补齐缺失的 bash/read 桩工具。
 #[derive(Default)]
