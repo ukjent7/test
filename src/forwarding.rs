@@ -584,9 +584,9 @@ fn is_allowed_opencode_model(wire_model: &str) -> bool {
 
 fn is_session_title_request(request: &Value) -> bool {
     let has_session_title_tool = request["tools"].as_array().is_some_and(|tools| {
-        tools.iter().any(|t| {
-            t["function"]["name"] == "session_title" || t["name"] == "session_title"
-        })
+        tools
+            .iter()
+            .any(|t| t["function"]["name"] == "session_title" || t["name"] == "session_title")
     });
     let has_session_title_choice = request["tool_choice"]["function"]["name"] == "session_title"
         || request["tool_choice"]["name"] == "session_title"
@@ -597,4 +597,3 @@ fn is_session_title_request(request: &Value) -> bool {
                 .as_array()
                 .is_some_and(|tools| tools.len() == 1))
 }
-

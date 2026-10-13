@@ -420,15 +420,17 @@ impl StreamFix {
                         self.synthetic += 1;
                         let mut hasher = DefaultHasher::new();
                         (choice_index, index, self.synthetic).hash(&mut hasher);
+                        let id = format!("call_{:016x}", hasher.finish());
                         self.call_args.insert(
                             (choice_index, index),
                             CallArgs {
+                                id: id.clone(),
                                 name: name.clone(),
                                 text: String::new(),
                                 flushed: true,
                             },
                         );
-                        json!({"index": index, "id": format!("call_{:016x}", hasher.finish()),
+                        json!({"index": index, "id": id,
                             "type": "function",
                             "function": {"name": name, "arguments": args}})
                     }
