@@ -238,7 +238,7 @@ impl StreamFix {
                 for mut call in calls.drain(..) {
                     let call_index = call["index"].as_u64().unwrap_or(0);
                     let mut name = call["function"]["name"].as_str().unwrap_or("").to_owned();
-                    let call_id = call["id"].as_str().unwrap_or("");
+                    let call_id = call["id"].as_str().unwrap_or("").to_owned();
                     let has_new_identity = !call_id.is_empty() || !name.is_empty();
 
                     let is_reused_index = if let Some(&existing_idx) =
@@ -323,7 +323,7 @@ impl StreamFix {
                         .entry((choice_index, client_index))
                         .or_default();
                     if !call_id.is_empty() && entry.id.is_empty() {
-                        entry.id = call_id.to_owned();
+                        entry.id = call_id.clone();
                     }
                     let has_name = !name.is_empty();
                     if has_name {
