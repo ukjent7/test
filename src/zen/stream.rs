@@ -15,6 +15,7 @@ use crate::app::Change;
 /// 工具名。
 #[derive(Default)]
 struct CallArgs {
+    id: String,
     name: String,
     text: String,
     flushed: bool,
@@ -63,6 +64,10 @@ impl StreamFix {
             "responses" => self.responses_frame(value),
             _ => (true, Vec::new()),
         }
+    }
+
+    pub fn has_pending_markup(&self) -> bool {
+        self.markup.is_some()
     }
 
     /// 上游参数要同时满足 JSON 完整与工具必填字段才下发：原生流经常
@@ -233,8 +238,34 @@ impl StreamFix {
                 for mut call in calls.drain(..) {
                     let call_index = call["index"].as_u64().unwrap_or(0);
                     let mut name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                    let call_id = call["id"].as_str().unwrap_or("");
+                    let has_new_identity = !call_id.is_empty() || !name.is_empty();
+
+                    let is_reused_index = if let Some(&existing_idx) =
+                        self.call_map.get(&(choice_index, call_index))
+                    {
+                        if let Some(existing_args) =
+                            self.call_args.get(&(choice_index, existing_idx))
+                        {
+                            let different_id = !call_id.is_empty()
+                                && !existing_args.id.is_empty()
+                                && call_id != existing_args.id;
+                            let flushed_with_new_call = existing_args.flushed && has_new_identity;
+                            different_id || flushed_with_new_call
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if is_reused_index {
+                        self.stub_calls.remove(&(choice_index, call_index));
+                        self.call_map.remove(&(choice_index, call_index));
+                    }
+
                     let is_empty_call = name.is_empty()
-                        && call["id"].as_str().is_none_or(str::is_empty)
+                        && call_id.is_empty()
                         && !self.call_map.contains_key(&(choice_index, call_index));
                     if is_empty_call {
                         self.stub_calls.insert((choice_index, call_index));
@@ -291,6 +322,9 @@ impl StreamFix {
                         .call_args
                         .entry((choice_index, client_index))
                         .or_default();
+                    if !call_id.is_empty() && entry.id.is_empty() {
+                        entry.id = call_id.to_owned();
+                    }
                     let has_name = !name.is_empty();
                     if has_name {
                         entry.name = name;

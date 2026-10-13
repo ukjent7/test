@@ -78,6 +78,23 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
             end += 1;
         }
         if end > start {
+            let already_aligned = end - start == order_map.len()
+                && messages[start..end].iter().enumerate().all(|(pos, msg)| {
+                    let Some(id) = msg["tool_call_id"].as_str() else {
+                        return false;
+                    };
+                    let Some(&(expected_idx, ref name)) = order_map.get(id) else {
+                        return false;
+                    };
+                    expected_idx == pos
+                        && (name.is_empty()
+                            || msg["name"].as_str().is_some_and(|n| !n.is_empty()))
+                });
+            if already_aligned {
+                i = end;
+                continue;
+            }
+
             let original_slice = messages[start..end].to_vec();
             let mut valid_slice: Vec<_> = original_slice
                 .iter()
@@ -154,6 +171,9 @@ pub(crate) fn normalize_history(request: &mut Value) -> Vec<Change> {
         let target_path = format!("/messages/{target_message}");
         target_message += 1;
         let blocks = message["content"].as_array_mut().unwrap();
+        if !blocks.iter().any(unsigned_thinking) {
+            return true;
+        }
         let mut source_block = 0;
         let mut target_block = 0;
         // pi: unsigned thinking is plain text on replay; valid signatures remain opaque.
@@ -253,6 +273,20 @@ pub(crate) fn normalize_sse(
     usage: &mut cache::Usage,
     zen: Option<&mut zen::StreamFix>,
 ) -> (Vec<u8>, Vec<Change>) {
+    let has_tool_calls = frame.windows(12).any(|w| w == b"\"tool_calls\"");
+    let has_usage = frame.windows(7).any(|w| w == b"\"usage\"");
+    let has_reasoning = frame.windows(11).any(|w| w == b"\"reasoning\"");
+    let has_markup = frame.windows(11).any(|w| w == b"<tool_call>");
+    let markup_pending = zen.as_ref().is_some_and(|z| z.has_pending_markup());
+    if endpoint != "messages"
+        && !has_tool_calls
+        && !has_usage
+        && !has_reasoning
+        && !has_markup
+        && !markup_pending
+    {
+        return (frame.to_vec(), Vec::new());
+    }
     let Ok(text) = std::str::from_utf8(frame) else {
         return (frame.to_vec(), Vec::new());
     };
