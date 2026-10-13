@@ -21,6 +21,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_RELEASE_DEBUG: 0
   RUST_BACKTRACE: 1
   PYTHONUNBUFFERED: 1
   PYTHONUTF8: 1
@@ -37,6 +38,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Setup mold linker
+        if: runner.os == 'Linux'
+        uses: rui314/setup-mold@v1
       - uses: actions/setup-python@v7
         with:
           python-version: '3.15'
@@ -56,10 +60,10 @@ jobs:
           mkdir -p artifacts/build
           rustc --version --verbose > artifacts/build/toolchain.txt
           cargo tree --locked --depth 1 > artifacts/build/dependencies.txt
-      - name: Lint and build gateway
+      - name: Build and lint gateway
         run: |
-          cargo clippy --locked --release --bin messages-gateway -- -D warnings
           cargo build --locked --release
+          cargo clippy --locked --release --bin messages-gateway -- -D warnings
       - name: Fetch and build pinned Grok production decoder
         run: |
           python tests/fetch_grok_wire.py --output artifacts/build
