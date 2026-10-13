@@ -60,6 +60,7 @@ impl ZenTools {
                 &["directory", "dir_path", "dir", "path"],
             ),
             ("file_path", &["target_file", "filepath"]),
+            ("block_until_ms", &["block_until"]),
         ];
         for &(canonical, aliases) in ALIASES {
             let has_canonical_prop = schema["properties"].get(canonical).is_some();
@@ -100,6 +101,24 @@ impl ZenTools {
                 {
                     *val = parsed;
                     changed = true;
+                } else if markup::prop_has_type(prop, "integer")
+                    && let Ok(parsed) = trimmed.parse::<i64>()
+                {
+                    *val = json!(parsed);
+                    changed = true;
+                } else if markup::prop_has_type(prop, "number")
+                    && let Ok(parsed) = trimmed.parse::<f64>()
+                {
+                    *val = json!(parsed);
+                    changed = true;
+                } else if markup::prop_has_type(prop, "boolean") {
+                    if trimmed == "true" {
+                        *val = json!(true);
+                        changed = true;
+                    } else if trimmed == "false" {
+                        *val = json!(false);
+                        changed = true;
+                    }
                 }
             }
         }

@@ -4,30 +4,155 @@ use crate::app::Change;
 
 pub(crate) type MarkupCall = (String, Vec<(String, String)>);
 
-/// 解析单个 <tool_call> 标记段（不含收尾标签）：<function=名字> 后跟
-/// 一串 <parameter=键>值</parameter>；结构不符时放弃，content 原样保留。
-pub(crate) fn parse_markup_call(region: &str) -> Option<MarkupCall> {
-    let rest = region.strip_prefix("<tool_call>")?.trim_start();
-    let rest = rest.strip_prefix("<function=")?;
-    let end = rest.find('>')?;
-    let name = rest[..end].trim().to_owned();
-    let mut rest = &rest[end + 1..];
-    let mut params = Vec::new();
-    while let Some(item) = rest.strip_prefix("<parameter=") {
-        let Some(end) = item.find('>') else {
-            break;
-        };
-        let key = item[..end].trim().to_owned();
-        let after = &item[end + 1..];
-        let Some(value_end) = after.find("</parameter>") else {
-            break;
-        };
-        params.push((key, after[..value_end].to_owned()));
-        rest = after[value_end + "</parameter>".len()..].trim_start();
+fn extract_attribute(text: &str, attr: &str) -> Option<String> {
+    for quote in ['"', '\''] {
+        let pattern = format!("{attr}={quote}");
+        if let Some(pos) = text.find(&pattern) {
+            let after = &text[pos + pattern.len()..];
+            if let Some(end) = after.find(quote) {
+                return Some(after[..end].to_owned());
+            }
+        }
     }
-    if name.is_empty() {
+    None
+}
+
+fn extract_func_name(header: &str) -> Option<String> {
+    if let Some(name) = extract_attribute(header, "name") {
+        return Some(name);
+    }
+    let trimmed = header.trim_start();
+    let s = trimmed
+        .strip_prefix('=')
+        .or_else(|| trimmed.strip_prefix(':'))
+        .unwrap_or(trimmed)
+        .trim();
+    let name = s
+        .trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace())
+        .split_whitespace()
+        .next()?
+        .to_owned();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+fn extract_key(header: &str) -> Option<String> {
+    if let Some(key) = extract_attribute(header, "name").or_else(|| extract_attribute(header, "key")) {
+        return Some(key);
+    }
+    let trimmed = header.trim_start();
+    let s = trimmed.strip_prefix('=').unwrap_or(trimmed).trim();
+    let key = s
+        .trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace())
+        .split_whitespace()
+        .next()?
+        .to_owned();
+    if key.is_empty() { None } else { Some(key) }
+}
+
+fn trim_single_newline_pair(s: &str) -> &str {
+    let mut result = s;
+    if let Some(stripped) = result.strip_prefix("\r\n").or_else(|| result.strip_prefix('\n')) {
+        result = stripped;
+    }
+    if let Some(stripped) = result.strip_suffix("\r\n").or_else(|| result.strip_suffix('\n')) {
+        result = stripped;
+    }
+    result
+}
+
+fn parse_param_block(block: &str) -> Option<(String, String)> {
+    let trimmed = block.trim();
+    if trimmed.is_empty() {
         return None;
     }
+    if let Some(gt) = block.find('>') {
+        let header = &block[..gt];
+        let is_malformed_header = if let Some(nl) = header.find('\n') {
+            let first_line = header[..nl].trim().strip_prefix('=').unwrap_or(header[..nl].trim());
+            first_line.contains('=')
+        } else {
+            false
+        };
+        if !is_malformed_header {
+            let key = extract_key(header)?;
+            let body = &block[gt + 1..];
+            let value = if body.trim().is_empty() {
+                if let Some(val) = extract_attribute(header, "value") {
+                    val
+                } else if let Some(eq) = header.strip_prefix('=').and_then(|h| h.find('=')) {
+                    header.strip_prefix('=').unwrap()[eq + 1..]
+                        .trim()
+                        .trim_matches(|c: char| c == '"' || c == '\'')
+                        .to_owned()
+                } else {
+                    String::new()
+                }
+            } else {
+                trim_single_newline_pair(body).to_owned()
+            };
+            return Some((key, value));
+        }
+    }
+    let content = block.strip_prefix('=').unwrap_or(block).trim();
+    if let Some(eq) = content.find('=') {
+        let key = content[..eq].trim().trim_matches(|c: char| c == '"' || c == '\'');
+        let val = content[eq + 1..].trim().trim_matches(|c: char| c == '"' || c == '\'');
+        if !key.is_empty() {
+            return Some((key.to_owned(), val.to_owned()));
+        }
+    }
+    None
+}
+
+/// 解析单个 <tool_call> 标记段（不含收尾标签）：容错解析非标与残缺格式
+/// （漏闭合 >、属性写法、换行等），准确提取函数名与参数键值对。
+pub(crate) fn parse_markup_call(region: &str) -> Option<MarkupCall> {
+    let rest = region.strip_prefix("<tool_call>")?.trim_start();
+    let func_pos = rest.find("<function")?;
+    let after_func = &rest[func_pos + "<function".len()..];
+
+    let gt_pos = after_func.find('>');
+    let next_param = after_func.find("<parameter");
+    let nl_pos = after_func.find('\n');
+
+    let (func_header, params_start) = match (gt_pos, next_param) {
+        (Some(gt), Some(np)) if gt < np => (&after_func[..gt], &after_func[gt + 1..]),
+        (Some(gt), None) => (&after_func[..gt], &after_func[gt + 1..]),
+        _ => {
+            let candidates = [next_param, nl_pos];
+            let end = candidates.into_iter().flatten().min().unwrap_or(after_func.len());
+            (&after_func[..end], &after_func[end..])
+        }
+    };
+
+    let name = extract_func_name(func_header)?;
+    let mut params = Vec::new();
+    let mut cursor = params_start;
+
+    while let Some(param_pos) = cursor.find("<parameter") {
+        let after_tag = &cursor[param_pos + "<parameter".len()..];
+        let close_tag = after_tag.find("</parameter>");
+        let next_open = after_tag.find("<parameter");
+        let func_close = after_tag.find("</function>");
+
+        let end_candidates = [close_tag, next_open, func_close];
+        let end_pos = end_candidates.into_iter().flatten().min().unwrap_or(after_tag.len());
+
+        let block = &after_tag[..end_pos];
+        if let Some((k, v)) = parse_param_block(block) {
+            params.push((k, v));
+        }
+
+        if close_tag == Some(end_pos) {
+            cursor = &after_tag[end_pos + "</parameter>".len()..];
+        } else {
+            cursor = &after_tag[end_pos..];
+            if func_close == Some(end_pos) {
+                break;
+            }
+        }
+    }
+
     Some((name, params))
 }
 
@@ -48,9 +173,30 @@ pub(crate) fn prop_has_type(prop: &Value, expected: &str) -> bool {
 }
 
 /// 按工具 schema 把文本参数值转成声明类型，避免客户端把布尔或数字
-/// 当字符串拒绝反序列化。支持联合与可空声明（如 `["integer", "null"]`）。
+/// 当字符串拒绝反序列化。支持联合与可空声明（如 `["integer", "null"]`），支持别名匹配。
 pub(crate) fn typed_value(schema: &Value, key: &str, raw: &str) -> Value {
-    let prop = &schema["properties"][key];
+    let prop = match schema["properties"].get(key) {
+        Some(p) if !p.is_null() => p,
+        _ => {
+            const ALIAS_MAP: &[(&str, &str)] = &[
+                ("block_until", "block_until_ms"),
+                ("path", "file_path"),
+                ("filepath", "file_path"),
+                ("dir", "target_directory"),
+            ];
+            let canonical = ALIAS_MAP
+                .iter()
+                .find(|(alias, _)| *alias == key)
+                .map(|(_, can)| *can);
+            if let Some(can) = canonical
+                && let Some(p) = schema["properties"].get(can)
+            {
+                p
+            } else {
+                &schema["properties"][key]
+            }
+        }
+    };
     let trimmed = raw.trim();
     if prop_has_type(prop, "boolean") {
         match trimmed {

@@ -268,6 +268,16 @@ class MockUpstream(BaseHTTPRequestHandler):
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
+        elif case == "zen-free-tool-malformed-markup":
+            def call_fragment(args, index=0):
+                return {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": index, "function": {"arguments": args}}]}}]}
+            chunks = [
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_cmd_malformed", "type": "function", "function": {"name": "run_terminal_command", "arguments": ""}}]}}]},
+                call_fragment("{\n"),
+                {"choices": [{"index": 0, "delta": {"content": '<tool_call>\n<function=run_terminal_command>\n<parameter=block_until=60000\n</parameter>\n<parameter=command>\ncd "/mnt/d/work" && git status\n</parameter>\n<parameter name="description">Check git status</parameter>\n</function>\n</tool_call>'}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+            wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
         elif case == "zen-free-tool-alias-and-typo":
             def call_fragment(args, index=0):
                 return {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": index, "function": {"arguments": args}}]}}]}
@@ -1147,6 +1157,47 @@ def run_zen_free_tier_cases(ctx):
     assert reasons.count("从正文剔除文本工具标记") == 1
     (ctx.output / "zen-free-tool-markup.sse").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-tool-markup-rebuilds-broken-native-args")
+
+    status, _, wire, _ = free_post(
+        "zen-free-tool-malformed-markup",
+        streaming=True,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_terminal_command",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["command"],
+                        "properties": {
+                            "block_until_ms": {"type": "integer"},
+                            "command": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        ],
+    )
+    assert status == 200
+    events = decode_sse(wire)
+    calls = {}
+    for event in events:
+        delta = event["choices"][0].get("delta") or {}
+        assert "<tool_call" not in (delta.get("content") or "")
+        assert "<parameter" not in (delta.get("content") or "")
+        assert "</function>" not in (delta.get("content") or "")
+        for call in delta.get("tool_calls") or []:
+            calls[call["index"]] = calls.get(call["index"], "") + (call["function"].get("arguments") or "")
+    parsed_args = json.loads(calls[0])
+    assert parsed_args == {
+        "block_until_ms": 60000,
+        "command": 'cd "/mnt/d/work" && git status',
+        "description": "Check git status",
+    }
+    assert events[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    (ctx.output / "zen-free-tool-malformed-markup.sse").write_text(wire.decode(), encoding="utf-8")
+    ctx.passed("free-tool-malformed-markup-repaired")
 
     status, _, wire, _ = free_post(
         "zen-free-multi-tool-concurrency",

@@ -418,6 +418,7 @@ impl StreamFix {
                     })
                     .map(|((_, client_index), entry)| {
                         entry.flushed = true;
+                        entry.text = args.clone();
                         *client_index
                     });
                 let entry = match matched {
