@@ -79,20 +79,16 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
         }
         if end > start {
             let already_aligned = end - start == order_map.len()
-                && messages[start..end]
-                    .iter()
-                    .enumerate()
-                    .all(|(pos, msg)| {
-                        let Some(id) = msg["tool_call_id"].as_str() else {
-                            return false;
-                        };
-                        let Some(&(expected_idx, ref name)) = order_map.get(id) else {
-                            return false;
-                        };
-                        expected_idx == pos
-                            && (name.is_empty()
-                                || msg["name"].as_str().is_some_and(|n| !n.is_empty()))
-                    });
+                && messages[start..end].iter().enumerate().all(|(pos, msg)| {
+                    let Some(id) = msg["tool_call_id"].as_str() else {
+                        return false;
+                    };
+                    let Some(&(expected_idx, ref name)) = order_map.get(id) else {
+                        return false;
+                    };
+                    expected_idx == pos
+                        && (name.is_empty() || msg["name"].as_str().is_some_and(|n| !n.is_empty()))
+                });
             if already_aligned {
                 i = end;
                 continue;
