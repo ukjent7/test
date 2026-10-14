@@ -36,7 +36,9 @@ fn extract_func_name(header: &str) -> Option<String> {
 }
 
 fn extract_key(header: &str) -> Option<String> {
-    if let Some(key) = extract_attribute(header, "name").or_else(|| extract_attribute(header, "key")) {
+    if let Some(key) =
+        extract_attribute(header, "name").or_else(|| extract_attribute(header, "key"))
+    {
         return Some(key);
     }
     let trimmed = header.trim_start();
@@ -51,10 +53,16 @@ fn extract_key(header: &str) -> Option<String> {
 
 fn trim_single_newline_pair(s: &str) -> &str {
     let mut result = s;
-    if let Some(stripped) = result.strip_prefix("\r\n").or_else(|| result.strip_prefix('\n')) {
+    if let Some(stripped) = result
+        .strip_prefix("\r\n")
+        .or_else(|| result.strip_prefix('\n'))
+    {
         result = stripped;
     }
-    if let Some(stripped) = result.strip_suffix("\r\n").or_else(|| result.strip_suffix('\n')) {
+    if let Some(stripped) = result
+        .strip_suffix("\r\n")
+        .or_else(|| result.strip_suffix('\n'))
+    {
         result = stripped;
     }
     result
@@ -68,7 +76,10 @@ fn parse_param_block(block: &str) -> Option<(String, String)> {
     if let Some(gt) = block.find('>') {
         let header = &block[..gt];
         let is_malformed_header = if let Some(nl) = header.find('\n') {
-            let first_line = header[..nl].trim().strip_prefix('=').unwrap_or(header[..nl].trim());
+            let first_line = header[..nl]
+                .trim()
+                .strip_prefix('=')
+                .unwrap_or(header[..nl].trim());
             first_line.contains('=')
         } else {
             false
@@ -95,8 +106,12 @@ fn parse_param_block(block: &str) -> Option<(String, String)> {
     }
     let content = block.strip_prefix('=').unwrap_or(block).trim();
     if let Some(eq) = content.find('=') {
-        let key = content[..eq].trim().trim_matches(|c: char| c == '"' || c == '\'');
-        let val = content[eq + 1..].trim().trim_matches(|c: char| c == '"' || c == '\'');
+        let key = content[..eq]
+            .trim()
+            .trim_matches(|c: char| c == '"' || c == '\'');
+        let val = content[eq + 1..]
+            .trim()
+            .trim_matches(|c: char| c == '"' || c == '\'');
         if !key.is_empty() {
             return Some((key.to_owned(), val.to_owned()));
         }
@@ -120,7 +135,11 @@ pub(crate) fn parse_markup_call(region: &str) -> Option<MarkupCall> {
         (Some(gt), None) => (&after_func[..gt], &after_func[gt + 1..]),
         _ => {
             let candidates = [next_param, nl_pos];
-            let end = candidates.into_iter().flatten().min().unwrap_or(after_func.len());
+            let end = candidates
+                .into_iter()
+                .flatten()
+                .min()
+                .unwrap_or(after_func.len());
             (&after_func[..end], &after_func[end..])
         }
     };
@@ -136,7 +155,11 @@ pub(crate) fn parse_markup_call(region: &str) -> Option<MarkupCall> {
         let func_close = after_tag.find("</function>");
 
         let end_candidates = [close_tag, next_open, func_close];
-        let end_pos = end_candidates.into_iter().flatten().min().unwrap_or(after_tag.len());
+        let end_pos = end_candidates
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(after_tag.len());
 
         let block = &after_tag[..end_pos];
         if let Some((k, v)) = parse_param_block(block) {
