@@ -1486,14 +1486,14 @@ def run_zen_free_tier_cases(ctx):
 
     core_tools = [{"type": "function", "function": {"name": name}} for name in ("bash", "edit", "glob", "grep", "read")]
     status, _, _, seen = free_post("zen-free-always-denied", streaming=True, tools=core_tools)
-    assert status == 403 and len(seen) == 1
-    sent = {tool["function"]["name"]: tool["function"] for tool in seen[0]["body"]["tools"]}
+    assert status == 403 and len(seen) == 2, "整形一次后仍旧 403 必须直接 surfaced，不能继续重试"
+    sent = {tool["function"]["name"]: tool["function"] for tool in seen[1]["body"]["tools"]}
     assert set(sent) == {"bash", "edit", "glob", "grep", "read", "shell"}
     for name in ("edit", "glob", "grep", "read", "shell"):
         assert sent[name]["description"] == OFFICIAL_TOOLS[name]["description"], name
         assert sent[name]["parameters"] == OFFICIAL_TOOLS[name]["parameters"], name
     assert sent["bash"] == {"name": "bash"}
-    ctx.passed("fully-shaped-free-error-is-not-retried")
+    ctx.passed("free-error-shaped-once-and-surfaced")
 
     # 客户端自带的官方同名工具必须换成官方原文，否则整个请求 403。
     bogus = [{"type": "function", "function": {"name": name, "description": "自编桩",

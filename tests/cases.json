@@ -102,7 +102,7 @@
     "zen-free-invalid",
     "zen-free-missing-done",
     "zen-free-truncated",
-    "fully-shaped-free-error-is-not-retried",
+    "free-error-shaped-once-and-surfaced",
     "ordinary-zen-403-is-not-retried",
     "configured-keys-private-and-routing-visible"
   ],
