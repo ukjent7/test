@@ -373,10 +373,9 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
         ));
         request["stream"] = true.into();
     }
-    if request
-        .get("response_format")
-        .is_some_and(|rf| rf.get("type") == Some(&json!("json_schema")) || rf.get("json_schema").is_some())
-    {
+    if request.get("response_format").is_some_and(|rf| {
+        rf.get("type") == Some(&json!("json_schema")) || rf.get("json_schema").is_some()
+    }) {
         let before = request
             .as_object_mut()
             .and_then(|obj| obj.remove("response_format"));
