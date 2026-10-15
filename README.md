@@ -65,7 +65,7 @@ api_backend = "chat_completions"
 ## 兼容处理
 
 - Messages 补齐 thinking 块缺失或 null 的 `thinking` / `signature`，不伪造签名；历史无签名思考转为文本，有签名内容原样保留。
-- Zen 按 OpenCode 客户端形态补齐请求头（UA、会话、每轮 msg id、client/project 标签）与稳定会话标识。免费模型（`-free` 后缀及 `big-pickle`、`grok-code`）在发送前即按免费层要求整形：强制流式、补齐小写 `bash`/`read` 工具、客户端工具大小写变体改名并在回复中改回、丢弃对补桩工具的调用；未知免费模型在收到 `403 FreeTierError` 后补齐并最多重发一次。非流式客户端仍收到聚合后的单条 JSON。
+- Zen 按 OpenCode 客户端形态补齐请求头（UA、会话、client/project 标签）与稳定会话标识。免费模型（`-free` 后缀及 `big-pickle`、`grok-code`）在发送前即按免费层要求整形：强制流式、把官方清单里的工具定义改写为官方原文并补齐缺失的 `shell`/`read` 官方工具、在系统指令里劝退模型调用这些占位工具、丢弃对补桩工具的调用；未知免费模型在收到 `403 FreeTierError` 后补齐并最多重发一次。网关与客户端都没有密钥时走 Zen 匿名车道，只请求 `/inference` 基地址并使用字面令牌 `public`。非流式客户端仍收到聚合后的单条 JSON。
 - 借鉴成熟客户端方案增强请求与流解析鲁棒性：修剪无内容的空助手消息、为发起工具调用的思考模型消息补齐 `reasoning_content` 防御校验错误、统一探测并规整思维链别名（`reasoning_content` / `reasoning` / `reasoning_text`），并在参数下发与对齐中容错修复控制字符与非法反斜杠。
 - 正常响应保持原生转发，SSE 及时发送；活动记录区分缓存用量为零与上游未报告。JSON 正文 DIFF 展示字段路径、行号、改动前后 4 行上下文和行内高亮，忽略字段顺序与格式空白；只记路径的逐帧修补按原因与路径聚合为一张可展开的卡片；多行正文（如 SSE）的原始字节 DIFF 按行配对并折叠未变行，单行正文与二进制保持字节级比较；完整正文可展开查看。
 

@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::Gateway;
 use crate::{
     error::ApiError,
-    settings::{messages_url, network_clients},
+    settings::{anonymous_base_url, messages_url, network_clients},
 };
 
 pub(super) fn router() -> Router<Arc<Gateway>> {
@@ -157,6 +157,7 @@ async fn update_settings(
         settings.opencode_base_url = base.trim().trim_end_matches('/').to_owned();
     }
     let opencode_url = messages_url(&settings.opencode_base_url)?;
+    let opencode_anonymous_url = messages_url(&anonymous_base_url(&settings.opencode_base_url))?;
     if let Some(key) = input.stepfun_api_key {
         settings.stepfun_api_key = key.trim().to_owned();
     }
@@ -178,6 +179,7 @@ async fn update_settings(
     control.clients = clients;
     control.messages_url = url;
     control.opencode_url = opencode_url;
+    control.opencode_anonymous_url = opencode_anonymous_url;
     Ok(StatusCode::NO_CONTENT)
 }
 

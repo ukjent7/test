@@ -13,7 +13,7 @@ use std::{
 use axum::{
     Router,
     extract::DefaultBodyLimit,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::Html,
     routing::{get, post},
 };
@@ -24,7 +24,7 @@ pub(crate) use trace::{Change, Trace};
 use crate::{
     error::ApiError,
     forwarding, history,
-    settings::{Settings, messages_url, network_clients, program_directory},
+    settings::{Settings, anonymous_base_url, messages_url, network_clients, program_directory},
 };
 
 #[derive(Default, Serialize)]
@@ -40,6 +40,7 @@ pub(super) struct Control {
     pub(super) clients: [reqwest::Client; 2],
     pub(super) messages_url: reqwest::Url,
     pub(super) opencode_url: reqwest::Url,
+    pub(super) opencode_anonymous_url: reqwest::Url,
     pub(super) stats: Stats,
     pub(super) history: history::History,
     pub(super) next_id: i64,
@@ -60,7 +61,23 @@ pub(crate) struct Upstream {
 }
 
 impl Gateway {
-    pub(crate) fn upstreams(&self, endpoint: &str) -> Result<[Upstream; 2], ApiError> {
+    /// 完全无凭证（网关设置与客户端都没带 key）时走 Zen 匿名车道。匿名流量自 2026-10-14 起
+    /// 只被 /inference 受理，keyed 流量仍走配置的 /zen 基地址。
+    pub(crate) fn opencode_anonymous(&self, headers: &HeaderMap) -> bool {
+        let control = self.control.lock().unwrap();
+        control.settings.opencode_api_key.is_empty()
+            && !headers.contains_key("x-api-key")
+            && !headers
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("Bearer "))
+    }
+
+    pub(crate) fn upstreams(
+        &self,
+        endpoint: &str,
+        anonymous: bool,
+    ) -> Result<[Upstream; 2], ApiError> {
         let control = self.control.lock().unwrap();
         if !control.settings.enabled {
             return Err(ApiError(
@@ -68,6 +85,11 @@ impl Gateway {
                 "网关转发已停止".into(),
             ));
         }
+        let opencode_url = if anonymous {
+            &control.opencode_anonymous_url
+        } else {
+            &control.opencode_url
+        };
         Ok([
             (
                 &control.messages_url,
@@ -75,7 +97,7 @@ impl Gateway {
                 control.settings.stepfun_use_proxy,
             ),
             (
-                &control.opencode_url,
+                opencode_url,
                 &control.settings.opencode_api_key,
                 control.settings.opencode_use_proxy,
             ),
@@ -115,6 +137,8 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
     let settings = Settings::load(&settings_path)?;
     let opencode_url = messages_url(&settings.opencode_base_url)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
+    let opencode_anonymous_url = messages_url(&anonymous_base_url(&settings.opencode_base_url))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let messages_url = messages_url(&settings.upstream_base_url)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -131,6 +155,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
             clients,
             messages_url,
             opencode_url,
+            opencode_anonymous_url,
             stats: Stats::default(),
             history,
             next_id,

@@ -1,22 +1,30 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 
 use serde_json::{Value, json};
 
 use super::markup;
 use crate::app::Change;
 
-/// 【硬性协议门槛说明】Zen 免费层只服务 OpenCode 自身：服务端强制校验请求必须为流式，
-/// 且 tools 列表中必须提供名为 bash 与 read 的工具（小写，仅按名匹配），若缺少任何一个，
-/// 服务端将直接返回 403 FreeTierError 拒绝服务。
-///
-/// 因此，为请求补齐缺失的 bash/read 虚拟桩工具是满足上游准入的刚性前置要求，绝对不可精简或
-/// 判定为冗余。客户端已有工具完整保留；缺的补齐兼容占位桩，模型若调用桩工具其内容会被安全丢弃。
-const ZEN_TOOLS: [&str; 2] = ["bash", "read"];
-/// 桩工具描述：避免使用 "Never call this tool" 等强硬警示词，防止推理模型在思考链（CoT）中
-/// 将其误解为与用户任务冲突的安全禁令，导致消耗额外思考 Token 甚至陷入目标混乱。
-const STUB_DESCRIPTION: &str = "Internal runtime compatibility placeholder for OpenCode host environment. Inactive; use primary session tools instead.";
+/// OpenCode 官方客户端（@opencode/cli@2.0.29）的真实工具定义。Zen 免费层自 2026-10-14 起
+/// 逐字节校验每个它认识的工具名的描述与参数 schema，自编桩（哪怕名字正确）一律 403。
+const OPENCODE_TOOLS: &str = include_str!("opencode_tools.json");
 
-/// Zen 免费层的工具整形结果：补齐缺失的 bash/read 桩工具。
+/// 【硬性协议门槛说明】Zen 免费层只服务 OpenCode 自身：服务端强制校验请求必须为流式，且
+/// tools 中必须带 read 的真实定义（shell 单独不满足，已对线上端点实测），否则直接返回 403
+/// FreeTierError。定义必须与官方客户端逐字节一致，因此这里内嵌官方原文，绝不手写。
+///
+/// 客户端已有工具完整保留；缺的补齐官方桩，模型若调用桩工具其内容会被安全丢弃。
+const ZEN_TOOLS: [&str; 2] = ["shell", "read"];
+
+fn opencode_tools() -> &'static BTreeMap<String, Value> {
+    static TOOLS: OnceLock<BTreeMap<String, Value>> = OnceLock::new();
+    TOOLS.get_or_init(|| serde_json::from_str(OPENCODE_TOOLS).unwrap_or_default())
+}
+
+/// Zen 免费层的工具整形结果：补齐缺失的 shell/read 官方桩工具。
 #[derive(Default)]
 pub struct ZenTools {
     pub(crate) stubs: BTreeSet<String>, // 客户端没有、只为 Zen 补的名字
@@ -303,7 +311,31 @@ fn tool_name(tool: &Value, chat: bool) -> &str {
     }
 }
 
-/// 免费模型在发送前就按 Zen 免费层的要求整形：流式、补齐缺失的 bash/read 基础工具。
+/// 把引导语并入顶层指令字段（messages 的 system、responses 的 instructions）。
+fn steer_field(request: &mut Value, field: &str, steering: &str) -> Value {
+    match request.get_mut(field) {
+        Some(Value::String(existing)) => {
+            let merged = format!("{steering}\n\n{existing}");
+            *existing = merged.clone();
+            json!(merged)
+        }
+        Some(Value::Array(blocks)) => {
+            blocks.insert(0, json!({"type": "text", "text": steering}));
+            Value::Array(blocks.clone())
+        }
+        Some(other) => {
+            *other = json!(steering);
+            json!(steering)
+        }
+        None => {
+            request[field] = json!(steering);
+            json!(steering)
+        }
+    }
+}
+
+/// 免费模型在发送前就按 Zen 免费层的要求整形：流式、把官方清单里的工具定义改写为原文、
+/// 补齐缺失的 shell/read 官方桩工具，并在系统指令里劝退模型调用这些占位工具。
 /// 改动以字段为单位记录，避免把用户正文带进差异视图。
 pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, ZenTools) {
     let mut tools = ZenTools::default();
@@ -342,20 +374,52 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
     if request.get("tools").is_none() {
         request["tools"] = json!([]);
     }
+    // 免费层同时校验客户端自带工具的 definition：名字在官方清单里的必须换成原文，
+    // 否则整个请求 403。清单外的名字原样透传，下游函数调用不受影响。
+    if let Some(tools_array) = request["tools"].as_array_mut() {
+        for (position, tool) in tools_array.iter_mut().enumerate() {
+            let name = tool_name(tool, chat).to_owned();
+            let Some(definition) = opencode_tools().get(&name) else {
+                continue;
+            };
+            let before = tool.clone();
+            if chat {
+                tool["function"]["description"] = definition["description"].clone();
+                tool["function"]["parameters"] = definition["parameters"].clone();
+            } else if endpoint == "responses" {
+                tool["description"] = definition["description"].clone();
+                tool["parameters"] = definition["parameters"].clone();
+            } else {
+                tool["description"] = definition["description"].clone();
+                tool["input_schema"] = definition["parameters"].clone();
+            }
+            if before != *tool {
+                changes.push(Change::new(
+                    format!("/tools/{position}"),
+                    Some(before),
+                    Some(tool.clone()),
+                    "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                ));
+            }
+        }
+    }
     if let Some(tools_array) = request["tools"].as_array_mut() {
         for need in ZEN_TOOLS {
             if tools_array.iter().any(|tool| tool_name(tool, chat) == need) {
                 continue;
             }
+            let Some(definition) = opencode_tools().get(need) else {
+                continue;
+            };
             let stub = match endpoint {
                 "chat/completions" => json!({"type": "function", "function": {
-                    "name": need, "description": STUB_DESCRIPTION,
-                    "parameters": {"type": "object", "properties": {}}}}),
+                    "name": need, "description": definition["description"],
+                    "parameters": definition["parameters"]}}),
                 "responses" => json!({"type": "function", "name": need,
-                    "description": STUB_DESCRIPTION,
-                    "parameters": {"type": "object", "properties": {}}}),
-                _ => json!({"name": need, "description": STUB_DESCRIPTION,
-                    "input_schema": {"type": "object", "properties": {}}}),
+                    "description": definition["description"],
+                    "parameters": definition["parameters"]}),
+                _ => json!({"name": need, "description": definition["description"],
+                    "input_schema": definition["parameters"]}),
             };
             tools_array.push(stub);
             tools.stubs.insert(need.to_owned());
@@ -369,6 +433,45 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
             Some(after_tools),
             "Zen 免费层要求流式与基础工具",
         ));
+    }
+    // 桩定义必须与官方逐字节一致，无法再用描述劝退模型；改为在系统指令里点名这些占位
+    // 工具不可用，把幻觉调用消灭在发生前。只针对网卡注入的名字，客户端自带的同名工具
+    // 有真实实现，不能劝退。
+    if !tools.stubs.is_empty() {
+        let names = tools.stubs.iter().cloned().collect::<Vec<_>>().join("、");
+        let steering = format!(
+            "注意：工具列表中的 {names} 是上游主机协议强制要求的占位工具，本环境不提供实现，调用必然失败。请勿调用它们，直接以文本回答用户。"
+        );
+        let change = if chat {
+            request
+                .get_mut("messages")
+                .and_then(Value::as_array_mut)
+                .map(|messages| {
+                    let message = json!({"role": "system", "content": &steering});
+                    messages.insert(0, message.clone());
+                    ("/messages/0".to_owned(), None, Some(message))
+                })
+        } else if endpoint == "messages" {
+            let before = request.get("system").cloned().filter(|value| !value.is_null());
+            Some((
+                "/system".to_owned(),
+                before,
+                Some(steer_field(request, "system", &steering)),
+            ))
+        } else {
+            let before = request
+                .get("instructions")
+                .cloned()
+                .filter(|value| !value.is_null());
+            Some((
+                "/instructions".to_owned(),
+                before,
+                Some(steer_field(request, "instructions", &steering)),
+            ))
+        };
+        if let Some((path, before, after)) = change {
+            changes.push(Change::new(path, before, after, "Zen 免费层占位工具引导"));
+        }
     }
     (changes, tools)
 }

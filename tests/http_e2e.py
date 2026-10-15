@@ -6,6 +6,7 @@ Run only in CI or against an already built binary. No provider credentials neede
 import http.client
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import threading
@@ -48,6 +49,31 @@ ZEN_MESSAGES_EVENTS = [
 ]
 
 
+# OpenCode 官方客户端的真实工具定义：免费层逐字节校验，mock 必须照此判定准入。
+OFFICIAL_TOOLS = json.loads(
+    (Path(__file__).resolve().parent.parent / "src" / "zen" / "opencode_tools.json").read_text(encoding="utf-8")
+)
+
+
+def genuine_tools(request):
+    """官方清单里的工具名必须带官方原文定义，自编桩（哪怕名字正确）一律 403。"""
+    for tool in request.get("tools", []):
+        name = tool.get("function", tool).get("name")
+        definition = OFFICIAL_TOOLS.get(name)
+        if definition is None:
+            continue
+        if "function" in tool:
+            if tool["function"].get("description") != definition["description"]:
+                return False
+            if tool["function"].get("parameters") != definition["parameters"]:
+                return False
+        elif tool.get("description") != definition["description"]:
+            return False
+        elif tool.get("input_schema", tool.get("parameters")) != definition["parameters"]:
+            return False
+    return True
+
+
 class MockUpstream(BaseHTTPRequestHandler):
     """Mock upstream server providing StepFun, Zen, cache, and free tier responses."""
 
@@ -73,7 +99,11 @@ class MockUpstream(BaseHTTPRequestHandler):
         return self.server.release
 
     def do_GET(self):
-        provider = "opencode" if "/zen/v1/models" in self.path else "stepfun"
+        provider = (
+            "opencode"
+            if "/zen/v1/models" in self.path or "/inference/v1/models" in self.path
+            else "stepfun"
+        )
         self.captures[f"models-{provider}"] = {"path": self.path, "headers": dict(self.headers)}
         status = self.model_errors.get(provider, 200)
         data = (
@@ -167,7 +197,8 @@ class MockUpstream(BaseHTTPRequestHandler):
                 valid_descending = abs(now_36 - decoded_ts) < 86400000
             except ValueError:
                 pass
-        if not request.get("stream") or not set(("bash", "read")) <= names or not valid_descending or case == "zen-free-always-denied":
+        if (not request.get("stream") or not {"shell", "read"} <= names or not valid_descending
+                or case == "zen-free-always-denied" or not genuine_tools(request)):
             wire = b'{"type":"error","error":{"type":"FreeTierError","message":"fixture"}}'
             self.send_response(403)
             self.send_header("Content-Type", "application/json")
@@ -176,7 +207,7 @@ class MockUpstream(BaseHTTPRequestHandler):
             self.wfile.write(wire)
             return
 
-        if case == "mimo-v2.5-free-messages":
+        if self.path.split("?", 1)[0].endswith("/messages"):
             wire = b"".join(b"data: " + json.dumps(event).encode() + b"\r\n\r\n" for event in ZEN_MESSAGES_EVENTS)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -212,7 +243,7 @@ class MockUpstream(BaseHTTPRequestHandler):
                 },
             ]
             wire = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks) + b"data: [DONE]\n\n"
-        elif case == "zen-free-responses":
+        elif self.path.split("?", 1)[0].endswith("/responses"):
             completed = {
                 "type": "response.completed",
                 "response": {
@@ -226,7 +257,7 @@ class MockUpstream(BaseHTTPRequestHandler):
             }
             wire = b"data: " + json.dumps(completed).encode() + b"\n\n"
         elif case in ("zen-free-stub", "zen-free-client-tool"):
-            tool_name = "bash" if case == "zen-free-stub" else "run_terminal_command"
+            tool_name = "shell" if case == "zen-free-stub" else "run_terminal_command"
             chunks = [
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "" if case == "zen-free-stub" else None}}]} if case == "zen-free-stub" else None,
                 {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_1" if case == "zen-free-client-tool" else "call_stub", "type": "function", "function": {"name": tool_name, "arguments": '{"command":'}}]}}]},
@@ -691,17 +722,14 @@ def run_zen_session_cases(ctx):
         assert capture["body"] == payload, capture
         assert capture["path"] == "http://opencode.ai/zen/v1/messages?beta=true"
         forwarded = {k.lower(): v for k, v in capture["headers"].items()}
-        assert forwarded["user-agent"] == "opencode/1.18.34"
+        assert forwarded["user-agent"] == "opencode/latest/2.0.29/cli"
         assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-session"])
-        assert re.fullmatch(r"msg_[0-9a-f]{12}[0-9A-Za-z]{14}", forwarded["x-opencode-request"])
+        assert forwarded["x-opencode-session-id"] == forwarded["x-opencode-session"]
         session_hex = forwarded["x-opencode-session"][4:16]
         now_36 = int(time.time() * 1000) & 0xF_FFFF_FFFF
         if forwarded["x-opencode-session"] != canonical:
             decoded_ts = ((~int(session_hex, 16)) & 0xFFFF_FFFF_FFFF) >> 12
             assert abs(now_36 - decoded_ts) < 60000, f"invalid session timestamp: {decoded_ts}"
-        request_hex = forwarded["x-opencode-request"][4:16]
-        decoded_req_ts = (int(request_hex, 16) & 0xFFFF_FFFF_FFFF) >> 12
-        assert abs(now_36 - decoded_req_ts) < 60000, f"invalid request timestamp: {decoded_req_ts}"
         assert forwarded["x-opencode-client"] == "cli"
         assert forwarded["x-opencode-project"] == "global"
         assert forwarded["x-api-key"] == "dummy-token"
@@ -709,7 +737,7 @@ def run_zen_session_cases(ctx):
         assert forwarded["anthropic-beta"] == "test-beta"
         assert set(forwarded) <= {
             "host", "content-length", "content-type", "accept", "accept-encoding", "user-agent",
-            "x-opencode-session", "x-opencode-request", "x-opencode-client", "x-opencode-project",
+            "x-opencode-session", "x-opencode-session-id", "x-opencode-client", "x-opencode-project",
             "x-api-key", "anthropic-version", "anthropic-beta",
         }, forwarded
         ctx.passed(case)
@@ -955,7 +983,7 @@ def run_model_catalog_and_routing_cases(ctx):
 
 def run_zen_free_tier_cases(ctx):
     """Zen free-tier emulation, tool renaming, restart recovery, markup repair, and 403 handling."""
-    def free_post(bare, streaming=False, **fields):
+    def free_post(bare, streaming=False, endpoint=None, **fields):
         payload = {
             "model": f"opencode/{bare}",
             "max_tokens": 64,
@@ -963,7 +991,7 @@ def run_zen_free_tier_cases(ctx):
             "messages": [{"role": "user", "content": "PRIVATE_FREE_MESSAGE"}],
             **fields,
         }
-        endpoint = "responses" if bare == "zen-free-responses" else "chat/completions"
+        endpoint = endpoint or ("responses" if bare == "zen-free-responses" else "chat/completions")
         if endpoint == "responses":
             payload.pop("messages")
             payload["input"] = "PRIVATE_FREE_MESSAGE"
@@ -987,10 +1015,14 @@ def run_zen_free_tier_cases(ctx):
     assert message["usage"]["total_tokens"] == 244 and message["cost"] == "0"
     assert len(seen) == 1 and seen[0]["body"]["stream"] is True
     assert "tool_choice" not in seen[0]["body"]
-    assert {tool["function"]["name"] for tool in seen[0]["body"]["tools"]} == {"bash", "read"}
+    assert {tool["function"]["name"] for tool in seen[0]["body"]["tools"]} == {"shell", "read"}
+    assert seen[0]["body"]["messages"][0]["role"] == "system"
+    assert "占位工具" in seen[0]["body"]["messages"][0]["content"]
+    assert seen[0]["body"]["messages"][1] == {"role": "user", "content": "PRIVATE_FREE_MESSAGE"}
     _, state = ctx.get("/ui/status")
     _, detail = ctx.get(f"/ui/calls/{state['calls'][0]['id']}")
     assert any(change["reason"] == "Zen 免费层要求流式与基础工具" for change in detail["diff"]["request"])
+    assert any(change["reason"] == "Zen 免费层占位工具引导" for change in detail["diff"]["request"])
     assert "PRIVATE_FREE_MESSAGE" not in json.dumps(detail["diff"])
     exchange = detail["exchange"]
     assert len(exchange["attempts"]) == 1
@@ -1025,6 +1057,8 @@ def run_zen_free_tier_cases(ctx):
     tools = seen[0]["body"]["tools"]
     assert tools[0] == {"name": "bash", "input_schema": {"type": "object"}}
     assert tools[1]["name"] == "read" and tools[1]["input_schema"]["type"] == "object"
+    assert tools[2]["name"] == "shell" and tools[2]["input_schema"] == OFFICIAL_TOOLS["shell"]["parameters"]
+    assert seen[0]["body"]["system"].startswith("注意：工具列表中的")
     assert seen[0]["body"]["messages"][0]["content"][0]["name"] == "bash"
     (ctx.output / "free-messages-collapse.json").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-messages-collapse-anthropic-wire")
@@ -1051,11 +1085,11 @@ def run_zen_free_tier_cases(ctx):
     status, _, wire, seen = free_post("zen-free-stub", streaming=True)
     assert status == 200
     events = decode_sse(wire)
-    assert len(events) == 2 and "bash" not in json.dumps(events)
+    assert len(events) == 2 and "shell" not in json.dumps(events)
     assert events[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
     assert events[1]["choices"][0]["finish_reason"] == "stop"
     assert len(seen) == 2
-    assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"bash", "read"}
+    assert {tool["function"]["name"] for tool in seen[1]["body"]["tools"]} == {"shell", "read"}
     ctx.passed("free-stub-call-dropped-and-stop-reclassified")
 
     status, _, wire, _ = free_post("zen-free-empty-tool", streaming=True)
@@ -1082,7 +1116,7 @@ def run_zen_free_tier_cases(ctx):
     assert events[2]["choices"][0]["finish_reason"] == "tool_calls"
     assert len(seen) == 2
     tools = seen[1]["body"]["tools"]
-    assert {tool["function"]["name"] for tool in tools} == {"run_terminal_command", "bash", "read"}
+    assert {tool["function"]["name"] for tool in tools} == {"run_terminal_command", "shell", "read"}
     ctx.passed("free-client-tools-preserved-with-stubs")
 
     status, _, wire, _ = free_post("zen-free-tool-restart", streaming=True)
@@ -1453,7 +1487,67 @@ def run_zen_free_tier_cases(ctx):
     core_tools = [{"type": "function", "function": {"name": name}} for name in ("bash", "edit", "glob", "grep", "read")]
     status, _, _, seen = free_post("zen-free-always-denied", streaming=True, tools=core_tools)
     assert status == 403 and len(seen) == 1
+    sent = {tool["function"]["name"]: tool["function"] for tool in seen[0]["body"]["tools"]}
+    assert set(sent) == {"bash", "edit", "glob", "grep", "read", "shell"}
+    for name in ("edit", "glob", "grep", "read", "shell"):
+        assert sent[name]["description"] == OFFICIAL_TOOLS[name]["description"], name
+        assert sent[name]["parameters"] == OFFICIAL_TOOLS[name]["parameters"], name
+    assert sent["bash"] == {"name": "bash"}
     ctx.passed("fully-shaped-free-error-is-not-retried")
+
+    # 客户端自带的官方同名工具必须换成官方原文，否则整个请求 403。
+    bogus = [{"type": "function", "function": {"name": name, "description": "自编桩",
+              "parameters": {"type": "object"}}} for name in ("read", "grep")]
+    status, _, _, seen = free_post("zen-free-official-definitions", streaming=True, tools=bogus)
+    assert status == 200 and len(seen) == 2
+    sent = {tool["function"]["name"]: tool["function"] for tool in seen[1]["body"]["tools"]}
+    assert set(sent) == {"read", "grep", "shell"}
+    for name in ("read", "grep", "shell"):
+        assert sent[name]["description"] == OFFICIAL_TOOLS[name]["description"], name
+        assert sent[name]["parameters"] == OFFICIAL_TOOLS[name]["parameters"], name
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-official-definitions')['id']}")
+    assert any(change["reason"] == "Zen 免费层校验工具定义，同名工具改写为官方原文"
+               for change in detail["diff"]["request"])
+    (ctx.output / "free-official-definitions.json").write_text(
+        json.dumps({"tools": seen[1]["body"]["tools"], "diff": detail["diff"]["request"]}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    ctx.passed("free-official-tool-definitions-rewritten")
+
+    # 占位工具无法用描述劝退（定义必须逐字节一致），改为在系统指令里点名不可用。
+    for bare, endpoint, field, streaming in (
+        ("zen-free-steering-chat", "chat/completions", "messages", True),
+        ("zen-free-steering-messages", "messages", "system", False),
+        ("zen-free-steering-responses", "responses", "instructions", False),
+    ):
+        status, _, _, seen = free_post(bare, streaming=streaming, endpoint=endpoint)
+        assert status == 200 and len(seen) == 2, bare
+        steering = (seen[1]["body"][field][0] if field == "messages" else seen[1]["body"][field])
+        text = steering["content"] if field == "messages" else steering
+        assert text.startswith("注意：工具列表中的 read、shell 是上游主机协议强制要求的占位工具"), bare
+        assert "请勿调用它们，直接以文本回答用户" in text, bare
+        if field == "messages":
+            assert steering["role"] == "system"
+            assert seen[1]["body"]["messages"][1] == {"role": "user", "content": "PRIVATE_FREE_MESSAGE"}
+        _, detail = ctx.get(f"/ui/calls/{ctx.latest_call(f'opencode/{bare}')['id']}")
+        assert any(change["reason"] == "Zen 免费层占位工具引导" for change in detail["diff"]["request"]), bare
+        (ctx.output / f"{bare}.json").write_text(json.dumps(detail["diff"]["request"], ensure_ascii=False, indent=2),
+                                                 encoding="utf-8")
+        ctx.passed(f"free-placeholder-steering-in-{endpoint.replace('/', '-')}")
+
+    # 匿名车道（网关与客户端都没有 key）只被 /inference 受理，凭证是字面 public。
+    ctx.set_upstream(ctx.env["GATEWAY_UPSTREAM_BASE_URL"], opencode_base_url="http://opencode.ai/zen/v1",
+                     opencode_api_key="")
+    status, _, _, seen = free_post("zen-free-anonymous-lane", streaming=True)
+    assert status == 200 and len(seen) == 2
+    assert seen[1]["path"] == "https://opencode.ai/inference/v1/chat/completions"
+    forwarded = {k.lower(): v for k, v in seen[1]["headers"].items()}
+    assert forwarded["authorization"] == "Bearer public"
+    assert forwarded["x-opencode-session-id"] == forwarded["x-opencode-session"]
+    ctx.set_upstream(ctx.env["GATEWAY_UPSTREAM_BASE_URL"], opencode_base_url="http://opencode.ai/zen/v1",
+                     stepfun_api_key="configured-step-key", opencode_api_key="configured-zen-key")
+    (ctx.output / "free-anonymous-lane.json").write_text(json.dumps(seen[1], ensure_ascii=False, indent=2),
+                                                         encoding="utf-8")
+    ctx.passed("free-anonymous-lane-uses-inference-endpoint")
 
     case = "zen-error-403"
     payload = {"model": f"opencode/{case}", "stream": False, "messages": [{"role": "user", "content": "hi"}]}

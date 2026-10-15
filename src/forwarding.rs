@@ -136,7 +136,8 @@ async fn forward(
         };
         return Ok(response);
     }
-    let [stepfun, opencode] = gateway.upstreams(&endpoint).inspect_err(|error| {
+    let anonymous = gateway.opencode_anonymous(&headers);
+    let [stepfun, opencode] = gateway.upstreams(&endpoint, anonymous).inspect_err(|error| {
         trace.status = error.0.as_u16();
     })?;
     let model = request["model"].as_str().unwrap_or("").to_owned();
@@ -468,7 +469,7 @@ pub(crate) async fn models(
     State(gateway): State<Arc<Gateway>>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    let [stepfun, opencode] = gateway.upstreams("models")?;
+    let [stepfun, opencode] = gateway.upstreams("models", false)?;
     tokio::spawn(zen::sync_models_dev(opencode.client.clone()));
     let (stepfun, opencode) = futures_util::future::join(
         fetch_models(stepfun, headers.clone()),

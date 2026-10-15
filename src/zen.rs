@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use serde_json::Value;
 
 pub use collapse::{collapse, collapse_messages};
@@ -22,17 +22,15 @@ use crate::cache;
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 /// Zen 会拒绝过旧的 OpenCode 版本（426），跟随 OpenCode 的当前发布。
-const OPENCODE_VERSION: &str = "1.18.34";
+const OPENCODE_VERSION: &str = "2.0.29";
 
 pub fn is_zen(url: &reqwest::Url) -> bool {
     url.host_str() == Some("opencode.ai")
-        && matches!(
-            url.path(),
-            "/zen/v1/messages"
-                | "/zen/v1/chat/completions"
-                | "/zen/v1/responses"
-                | "/zen/v1/models"
-        )
+        && ["/zen/v1/", "/inference/v1/"].into_iter().any(|base| {
+            url.path()
+                .strip_prefix(base)
+                .is_some_and(|rest| matches!(rest, "messages" | "chat/completions" | "responses" | "models"))
+        })
 }
 
 static DYNAMIC_FREE_MODELS: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
@@ -93,15 +91,21 @@ pub fn prepare_headers(
     anthropic: bool,
 ) -> (&'static str, String) {
     let (source, session) = session_id(headers, request);
-    let key = headers.get("x-api-key").cloned().or_else(|| {
-        headers
-            .get(header::AUTHORIZATION)?
-            .to_str()
-            .ok()?
-            .strip_prefix("Bearer ")?
-            .parse()
-            .ok()
-    });
+    // 2026-10-14 起免费层拒绝缺失凭证的请求：无 key 的匿名车道必须带字面令牌 public
+    // （大小写敏感，"Bearer PUBLIC" 会 401）。
+    let key = headers
+        .get("x-api-key")
+        .cloned()
+        .or_else(|| {
+            headers
+                .get(header::AUTHORIZATION)?
+                .to_str()
+                .ok()?
+                .strip_prefix("Bearer ")?
+                .parse()
+                .ok()
+        })
+        .unwrap_or_else(|| HeaderValue::from_static("public"));
     let mut clean = HeaderMap::new();
     if anthropic {
         for name in ["anthropic-version", "anthropic-beta"] {
@@ -112,16 +116,12 @@ pub fn prepare_headers(
         clean
             .entry("anthropic-version")
             .or_insert("2023-06-01".parse().unwrap());
-    }
-    if let Some(key) = key {
-        if anthropic {
-            clean.insert("x-api-key", key);
-        } else {
-            clean.insert(
-                header::AUTHORIZATION,
-                format!("Bearer {}", key.to_str().unwrap()).parse().unwrap(),
-            );
-        }
+        clean.insert("x-api-key", key);
+    } else {
+        clean.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", key.to_str().unwrap()).parse().unwrap(),
+        );
     }
     clean.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
     clean.insert(
@@ -130,11 +130,11 @@ pub fn prepare_headers(
     );
     clean.insert(
         header::USER_AGENT,
-        format!("opencode/{OPENCODE_VERSION}").parse().unwrap(),
+        format!("opencode/latest/{OPENCODE_VERSION}/cli").parse().unwrap(),
     );
     clean.insert("x-opencode-session", session.parse().unwrap());
-    // OpenCode 还带每轮一个 msg_ id 与客户端、项目标签，照它发送。
-    clean.insert("x-opencode-request", turn_id().parse().unwrap());
+    // 2026-10-14 起两个 session 头必须同值；网关自己的 x-opencode-request 关联头会被 403。
+    clean.insert("x-opencode-session-id", session.parse().unwrap());
     clean.insert("x-opencode-client", "cli".parse().unwrap());
     clean.insert("x-opencode-project", "global".parse().unwrap());
     *headers = clean;
@@ -209,11 +209,6 @@ fn session_id(headers: &HeaderMap, request: &Value) -> (&'static str, String) {
         opencode_id("ses", true)
     };
     (source, session)
-}
-
-/// 每次上游请求一个 msg_ 形态的轮次 id，如同 OpenCode 自己发送。
-fn turn_id() -> String {
-    opencode_id("msg", false)
 }
 
 fn opencode_id(prefix: &str, descending: bool) -> String {

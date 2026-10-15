@@ -143,6 +143,17 @@ pub(crate) fn messages_url(base: &str) -> Result<reqwest::Url, ApiError> {
     Ok(url)
 }
 
+/// Zen 匿名（无 key）车道的基地址。2026-10-14 起免费层只受理 /inference 上的 keyless 流量，
+/// keyed 流量仍走 /zen，因此同一主机只换路径段派生；用户自建的转发基地址随之派生，匿名流量
+/// 不会绕过用户自己的代理。基地址里没有 /zen/ 段时原样返回，由用户自行保证可达。
+pub(crate) fn anonymous_base_url(base: &str) -> String {
+    let trimmed = base.trim().trim_end_matches('/');
+    match trimmed.split_once("/zen/") {
+        Some((head, tail)) => format!("{head}/inference/{tail}"),
+        None => trimmed.to_owned(),
+    }
+}
+
 pub(crate) fn program_directory() -> io::Result<PathBuf> {
     let mut path = env::current_exe()?;
     path.pop();
