@@ -435,13 +435,12 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
         ));
     }
     // 桩定义必须与官方逐字节一致，无法再用描述劝退模型；改为在系统指令里点名这些占位
-    // 工具不可用，把幻觉调用消灭在发生前。只针对网卡注入的名字，客户端自带的同名工具
-    // 有真实实现，不能劝退。
+    // 工具不可用，把幻觉调用消灭在发生前。shell/read 与真实工具同名，必须明说不是本环境
+    // 的工具，否则模型会把它当 bash 用。只针对网关注入的名字，客户端自带的同名工具
+    // 有真实实现，不能劝退；也不劝模型改用文本回答，那会连带压制客户端自己的真实工具。
     if !tools.stubs.is_empty() {
         let names = tools.stubs.iter().cloned().collect::<Vec<_>>().join("、");
-        let steering = format!(
-            "注意：工具列表中的 {names} 是上游主机协议强制要求的占位工具，本环境不提供实现，调用必然失败。请勿调用它们，直接以文本回答用户。"
-        );
+        let steering = format!("{names} 不是本环境的工具，只是无实现的占位符，不可调用。");
         let change = if chat {
             request
                 .get_mut("messages")

@@ -1017,7 +1017,7 @@ def run_zen_free_tier_cases(ctx):
     assert "tool_choice" not in seen[0]["body"]
     assert {tool["function"]["name"] for tool in seen[0]["body"]["tools"]} == {"shell", "read"}
     assert seen[0]["body"]["messages"][0]["role"] == "system"
-    assert "占位工具" in seen[0]["body"]["messages"][0]["content"]
+    assert "占位符" in seen[0]["body"]["messages"][0]["content"]
     assert seen[0]["body"]["messages"][1] == {"role": "user", "content": "PRIVATE_FREE_MESSAGE"}
     _, state = ctx.get("/ui/status")
     _, detail = ctx.get(f"/ui/calls/{state['calls'][0]['id']}")
@@ -1058,7 +1058,7 @@ def run_zen_free_tier_cases(ctx):
     assert tools[0] == {"name": "bash", "input_schema": {"type": "object"}}
     assert tools[1]["name"] == "shell" and tools[1]["input_schema"] == OFFICIAL_TOOLS["shell"]["parameters"]
     assert tools[2]["name"] == "read" and tools[2]["input_schema"] == OFFICIAL_TOOLS["read"]["parameters"]
-    assert seen[0]["body"]["system"].startswith("注意：工具列表中的")
+    assert seen[0]["body"]["system"].startswith("read、shell 不是本环境的工具")
     assert seen[0]["body"]["messages"][0]["content"][0]["name"] == "bash"
     (ctx.output / "free-messages-collapse.json").write_text(wire.decode(), encoding="utf-8")
     ctx.passed("free-messages-collapse-anthropic-wire")
@@ -1523,8 +1523,8 @@ def run_zen_free_tier_cases(ctx):
         assert status == 200 and len(seen) == 2, bare
         steering = (seen[1]["body"][field][0] if field == "messages" else seen[1]["body"][field])
         text = steering["content"] if field == "messages" else steering
-        assert text.startswith("注意：工具列表中的 read、shell 是上游主机协议强制要求的占位工具"), bare
-        assert "请勿调用它们，直接以文本回答用户" in text, bare
+        assert text.startswith("read、shell 不是本环境的工具，只是无实现的占位符"), bare
+        assert text.endswith("不可调用。"), bare
         if field == "messages":
             assert steering["role"] == "system"
             assert seen[1]["body"]["messages"][1] == {"role": "user", "content": "PRIVATE_FREE_MESSAGE"}
