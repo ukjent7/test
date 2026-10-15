@@ -118,6 +118,28 @@ impl Change {
                 before.remove(&key);
                 after.remove(&key);
             }
+        } else if let (Some(Value::Array(before_arr)), Some(Value::Array(after_arr))) =
+            (&mut before, &mut after)
+        {
+            if before_arr.iter().any(Value::is_object) || after_arr.iter().any(Value::is_object) {
+                let mut before_map = serde_json::Map::new();
+                let mut after_map = serde_json::Map::new();
+                let max_len = before_arr.len().max(after_arr.len());
+                for idx in 0..max_len {
+                    let b = before_arr.get(idx);
+                    let a = after_arr.get(idx);
+                    if b != a {
+                        if let Some(b_val) = b {
+                            before_map.insert(idx.to_string(), b_val.clone());
+                        }
+                        if let Some(a_val) = a {
+                            after_map.insert(idx.to_string(), a_val.clone());
+                        }
+                    }
+                }
+                before = Some(Value::Object(before_map));
+                after = Some(Value::Object(after_map));
+            }
         }
         Self {
             after_path: path.clone(),

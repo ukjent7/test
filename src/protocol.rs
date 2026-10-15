@@ -137,12 +137,63 @@ pub(crate) fn align_tool_responses(request: &mut Value) -> Vec<Change> {
                 }
             }
             if valid_slice != original_slice {
-                changes.push(Change::new(
-                    format!("/messages/{start}..{end}"),
-                    Some(json!(original_slice)),
-                    Some(json!(valid_slice.clone())),
-                    "对齐并发工具响应顺序与工具名",
-                ));
+                for (offset, msg) in original_slice.iter().enumerate() {
+                    let id_valid = msg["tool_call_id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty() && order_map.contains_key(id));
+                    if !id_valid {
+                        changes.push(Change::new(
+                            format!("/messages/{}", start + offset),
+                            Some(msg.clone()),
+                            None,
+                            "剔除无效空工具调用",
+                        ));
+                    }
+                }
+
+                let orig_order: Vec<_> = original_slice
+                    .iter()
+                    .filter_map(|m| {
+                        m["tool_call_id"]
+                            .as_str()
+                            .filter(|id| order_map.contains_key(*id))
+                    })
+                    .collect();
+                let new_order: Vec<_> = valid_slice
+                    .iter()
+                    .filter_map(|m| m["tool_call_id"].as_str())
+                    .collect();
+                if orig_order != new_order {
+                    changes.push(Change::new(
+                        format!("/messages/{start}..{end}/order"),
+                        Some(json!(orig_order)),
+                        Some(json!(new_order)),
+                        "对齐并发工具响应顺序与工具名",
+                    ));
+                }
+
+                for (idx, msg) in valid_slice.iter().enumerate() {
+                    let Some(id) = msg["tool_call_id"].as_str() else {
+                        continue;
+                    };
+                    let orig_had_name = original_slice
+                        .iter()
+                        .find(|m| m["tool_call_id"].as_str() == Some(id))
+                        .and_then(|m| m["name"].as_str())
+                        .is_some_and(|n| !n.is_empty());
+                    if !orig_had_name
+                        && let Some(name) = msg["name"].as_str()
+                        && !name.is_empty()
+                    {
+                        changes.push(Change::new(
+                            format!("/messages/{}/name", start + idx),
+                            None,
+                            Some(json!(name)),
+                            "对齐并发工具响应顺序与工具名",
+                        ));
+                    }
+                }
+
                 messages.splice(start..end, valid_slice.clone());
                 end = start + valid_slice.len();
             }

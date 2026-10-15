@@ -312,24 +312,27 @@ fn tool_name(tool: &Value, chat: bool) -> &str {
 }
 
 /// 把引导语并入顶层指令字段（messages 的 system、responses 的 instructions）。
-fn steer_field(request: &mut Value, field: &str, steering: &str) -> Value {
+fn steer_field(request: &mut Value, field: &str, steering: &str) -> (String, Option<Value>, Value) {
     match request.get_mut(field) {
         Some(Value::String(existing)) => {
+            let before = json!(existing.clone());
             let merged = format!("{steering}\n\n{existing}");
             *existing = merged.clone();
-            json!(merged)
+            (format!("/{field}"), Some(before), json!(merged))
         }
         Some(Value::Array(blocks)) => {
-            blocks.insert(0, json!({"type": "text", "text": steering}));
-            Value::Array(blocks.clone())
+            let block = json!({"type": "text", "text": steering});
+            blocks.insert(0, block.clone());
+            (format!("/{field}/0"), None, block)
         }
         Some(other) => {
+            let before = other.clone();
             *other = json!(steering);
-            json!(steering)
+            (format!("/{field}"), Some(before), json!(steering))
         }
         None => {
             request[field] = json!(steering);
-            json!(steering)
+            (format!("/{field}"), None, json!(steering))
         }
     }
 }
@@ -384,7 +387,6 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
             "Zen 免费层不支持 json_schema 类型的 response_format",
         ));
     }
-    let original_tools = request.get("tools").cloned();
     if request.get("tools").is_none() {
         request["tools"] = json!([]);
     }
@@ -396,27 +398,74 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
             let Some(definition) = opencode_tools().get(&name) else {
                 continue;
             };
-            let before = tool.clone();
             if chat {
-                tool["function"]["description"] = definition["description"].clone();
-                tool["function"]["parameters"] = definition["parameters"].clone();
+                let func = &mut tool["function"];
+                if func["description"] != definition["description"] {
+                    let before = func["description"].clone();
+                    func["description"] = definition["description"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/function/description"),
+                        Some(before),
+                        Some(definition["description"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
+                if func["parameters"] != definition["parameters"] {
+                    let before = func["parameters"].clone();
+                    func["parameters"] = definition["parameters"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/function/parameters"),
+                        Some(before),
+                        Some(definition["parameters"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
             } else if endpoint == "responses" {
-                tool["description"] = definition["description"].clone();
-                tool["parameters"] = definition["parameters"].clone();
+                if tool["description"] != definition["description"] {
+                    let before = tool["description"].clone();
+                    tool["description"] = definition["description"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/description"),
+                        Some(before),
+                        Some(definition["description"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
+                if tool["parameters"] != definition["parameters"] {
+                    let before = tool["parameters"].clone();
+                    tool["parameters"] = definition["parameters"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/parameters"),
+                        Some(before),
+                        Some(definition["parameters"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
             } else {
-                tool["description"] = definition["description"].clone();
-                tool["input_schema"] = definition["parameters"].clone();
-            }
-            if before != *tool {
-                changes.push(Change::new(
-                    format!("/tools/{position}"),
-                    Some(before),
-                    Some(tool.clone()),
-                    "Zen 免费层校验工具定义，同名工具改写为官方原文",
-                ));
+                if tool["description"] != definition["description"] {
+                    let before = tool["description"].clone();
+                    tool["description"] = definition["description"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/description"),
+                        Some(before),
+                        Some(definition["description"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
+                if tool["input_schema"] != definition["parameters"] {
+                    let before = tool["input_schema"].clone();
+                    tool["input_schema"] = definition["parameters"].clone();
+                    changes.push(Change::new(
+                        format!("/tools/{position}/input_schema"),
+                        Some(before),
+                        Some(definition["parameters"].clone()),
+                        "Zen 免费层校验工具定义，同名工具改写为官方原文",
+                    ));
+                }
             }
         }
     }
+    let tools_before_stubs = request.get("tools").cloned();
     if let Some(tools_array) = request["tools"].as_array_mut() {
         for need in ZEN_TOOLS {
             if tools_array.iter().any(|tool| tool_name(tool, chat) == need) {
@@ -440,10 +489,10 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
         }
     }
     let after_tools = request["tools"].clone();
-    if original_tools.as_ref() != Some(&after_tools) {
+    if tools_before_stubs.as_ref() != Some(&after_tools) {
         changes.push(Change::new(
             "/tools".into(),
-            original_tools,
+            tools_before_stubs,
             Some(after_tools),
             "Zen 免费层要求流式与基础工具",
         ));
@@ -465,25 +514,11 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
                     ("/messages/0".to_owned(), None, Some(message))
                 })
         } else if endpoint == "messages" {
-            let before = request
-                .get("system")
-                .cloned()
-                .filter(|value| !value.is_null());
-            Some((
-                "/system".to_owned(),
-                before,
-                Some(steer_field(request, "system", &steering)),
-            ))
+            let (path, before, after) = steer_field(request, "system", &steering);
+            Some((path, before, Some(after)))
         } else {
-            let before = request
-                .get("instructions")
-                .cloned()
-                .filter(|value| !value.is_null());
-            Some((
-                "/instructions".to_owned(),
-                before,
-                Some(steer_field(request, "instructions", &steering)),
-            ))
+            let (path, before, after) = steer_field(request, "instructions", &steering);
+            Some((path, before, Some(after)))
         };
         if let Some((path, before, after)) = change {
             changes.push(Change::new(path, before, after, "Zen 免费层占位工具引导"));

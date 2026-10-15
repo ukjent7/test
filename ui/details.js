@@ -384,8 +384,8 @@ function renderDiff(content, diff) {
         item.append(event);
       }
       if (count === 1 && Object.hasOwn(change, 'before') && Object.hasOwn(change, 'after')) {
-        const isObj = val => val !== null && typeof val === 'object';
-        if (isObj(change.before) && isObj(change.after)) {
+        const isPlainObj = val => val !== null && typeof val === 'object' && !Array.isArray(val);
+        if (isPlainObj(change.before) && isPlainObj(change.after)) {
           for (const key of new Set([...Object.keys(change.before), ...Object.keys(change.after)])) {
             const hasBefore = Object.hasOwn(change.before, key);
             const hasAfter = Object.hasOwn(change.after, key);
@@ -396,12 +396,16 @@ function renderDiff(content, diff) {
             diffLine(item, 'added', `+ ${key}: ${hasAfter ? formatPatchValue(change.after[key]) : '（已删除）'}`, true);
           }
         } else if (JSON.stringify(change.before) !== JSON.stringify(change.after)) {
-          diffLine(item, 'removed', `− ${formatPatchValue(change.before)}`, true);
-          diffLine(item, 'added', `+ ${formatPatchValue(change.after)}`, true);
+          if (change.before !== null && change.before !== undefined) diffLine(item, 'removed', `− ${formatPatchValue(change.before)}`, true);
+          if (change.after !== null && change.after !== undefined) diffLine(item, 'added', `+ ${formatPatchValue(change.after)}`, true);
         }
       } else if (count === 1 && (Object.hasOwn(change, 'before') || Object.hasOwn(change, 'after'))) {
-        diffLine(item, 'removed', `− ${Object.hasOwn(change, 'before') ? formatPatchValue(change.before) : '（字段不存在）'}`, true);
-        diffLine(item, 'added', `+ ${Object.hasOwn(change, 'after') ? formatPatchValue(change.after) : '（已删除）'}`, true);
+        if (Object.hasOwn(change, 'before') && change.before !== null && change.before !== undefined) {
+          diffLine(item, 'removed', `− ${formatPatchValue(change.before)}`, true);
+        }
+        if (Object.hasOwn(change, 'after') && change.after !== null && change.after !== undefined) {
+          diffLine(item, 'added', `+ ${formatPatchValue(change.after)}`, true);
+        }
       }
       section.append(item);
       index += count - 1;
