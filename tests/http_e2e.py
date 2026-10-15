@@ -1539,7 +1539,7 @@ def run_zen_free_tier_cases(ctx):
                      opencode_api_key="")
     status, _, _, seen = free_post("zen-free-anonymous-lane", streaming=True)
     assert status == 200 and len(seen) == 2
-    assert seen[1]["path"] == "https://opencode.ai/inference/v1/chat/completions"
+    assert seen[1]["path"] == "http://opencode.ai/inference/v1/chat/completions"
     forwarded = {k.lower(): v for k, v in seen[1]["headers"].items()}
     assert forwarded["authorization"] == "Bearer public"
     assert forwarded["x-opencode-session-id"] == forwarded["x-opencode-session"]
