@@ -27,9 +27,12 @@ const OPENCODE_VERSION: &str = "2.0.29";
 pub fn is_zen(url: &reqwest::Url) -> bool {
     url.host_str() == Some("opencode.ai")
         && ["/zen/v1/", "/inference/v1/"].into_iter().any(|base| {
-            url.path()
-                .strip_prefix(base)
-                .is_some_and(|rest| matches!(rest, "messages" | "chat/completions" | "responses" | "models"))
+            url.path().strip_prefix(base).is_some_and(|rest| {
+                matches!(
+                    rest,
+                    "messages" | "chat/completions" | "responses" | "models"
+                )
+            })
         })
 }
 
@@ -130,7 +133,9 @@ pub fn prepare_headers(
     );
     clean.insert(
         header::USER_AGENT,
-        format!("opencode/latest/{OPENCODE_VERSION}/cli").parse().unwrap(),
+        format!("opencode/latest/{OPENCODE_VERSION}/cli")
+            .parse()
+            .unwrap(),
     );
     clean.insert("x-opencode-session", session.parse().unwrap());
     // 2026-10-14 起两个 session 头必须同值；网关自己的 x-opencode-request 关联头会被 403。

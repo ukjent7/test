@@ -452,7 +452,10 @@ pub fn prepare_free_body(request: &mut Value, endpoint: &str) -> (Vec<Change>, Z
                     ("/messages/0".to_owned(), None, Some(message))
                 })
         } else if endpoint == "messages" {
-            let before = request.get("system").cloned().filter(|value| !value.is_null());
+            let before = request
+                .get("system")
+                .cloned()
+                .filter(|value| !value.is_null());
             Some((
                 "/system".to_owned(),
                 before,

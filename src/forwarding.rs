@@ -137,9 +137,11 @@ async fn forward(
         return Ok(response);
     }
     let anonymous = gateway.opencode_anonymous(&headers);
-    let [stepfun, opencode] = gateway.upstreams(&endpoint, anonymous).inspect_err(|error| {
-        trace.status = error.0.as_u16();
-    })?;
+    let [stepfun, opencode] = gateway
+        .upstreams(&endpoint, anonymous)
+        .inspect_err(|error| {
+            trace.status = error.0.as_u16();
+        })?;
     let model = request["model"].as_str().unwrap_or("").to_owned();
     if model.is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "缺少 model 字段".into()));

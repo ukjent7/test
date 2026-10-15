@@ -1056,8 +1056,8 @@ def run_zen_free_tier_cases(ctx):
     assert len(seen) == 1
     tools = seen[0]["body"]["tools"]
     assert tools[0] == {"name": "bash", "input_schema": {"type": "object"}}
-    assert tools[1]["name"] == "read" and tools[1]["input_schema"]["type"] == "object"
-    assert tools[2]["name"] == "shell" and tools[2]["input_schema"] == OFFICIAL_TOOLS["shell"]["parameters"]
+    assert tools[1]["name"] == "shell" and tools[1]["input_schema"] == OFFICIAL_TOOLS["shell"]["parameters"]
+    assert tools[2]["name"] == "read" and tools[2]["input_schema"] == OFFICIAL_TOOLS["read"]["parameters"]
     assert seen[0]["body"]["system"].startswith("注意：工具列表中的")
     assert seen[0]["body"]["messages"][0]["content"][0]["name"] == "bash"
     (ctx.output / "free-messages-collapse.json").write_text(wire.decode(), encoding="utf-8")
