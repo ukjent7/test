@@ -197,6 +197,15 @@ class MockUpstream(BaseHTTPRequestHandler):
                 valid_descending = abs(now_36 - decoded_ts) < 86400000
             except ValueError:
                 pass
+        if request.get("response_format", {}).get("type") == "json_schema":
+            wire = b'{"error":{"param":null,"type":"invalid_request_error","code":"invalid_request_error","message":"Upstream request failed: [invalid_request_error] This response_format type is unavailable now (request_id: fixture)"}}'
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(wire)))
+            self.end_headers()
+            self.wfile.write(wire)
+            return
+
         if (not request.get("stream") or not {"shell", "read"} <= names or not valid_descending
                 or case == "zen-free-always-denied" or not genuine_tools(request)):
             wire = b'{"type":"error","error":{"type":"FreeTierError","message":"fixture"}}'
@@ -1512,6 +1521,16 @@ def run_zen_free_tier_cases(ctx):
         json.dumps({"tools": seen[1]["body"]["tools"], "diff": detail["diff"]["request"]}, ensure_ascii=False, indent=2),
         encoding="utf-8")
     ctx.passed("free-official-tool-definitions-rewritten")
+
+    # 客户端结构化输出参数（如 memory-capture 的 json_schema）上游不支持，在免费层前置剥除。
+    rf = {"type": "json_schema", "json_schema": {"name": "test", "schema": {"type": "object"}}}
+    status, _, wire, seen = free_post("zen-free-json-schema-free", streaming=True, response_format=rf)
+    assert status == 200 and len(seen) == 1
+    assert "response_format" not in seen[0]["body"]
+    _, detail = ctx.get(f"/ui/calls/{ctx.latest_call('opencode/zen-free-json-schema-free')['id']}")
+    assert any(change["reason"] == "Zen 免费层不支持 json_schema 类型的 response_format"
+               for change in detail["diff"]["request"])
+    ctx.passed("free-json-schema-response-format-dropped")
 
     # 占位工具无法用描述劝退（定义必须逐字节一致），改为在系统指令里点名不可用。
     for bare, endpoint, field, streaming in (

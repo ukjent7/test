@@ -83,6 +83,7 @@
     "free-empty-tool-call-dropped-and-stop-reclassified",
     "free-client-tools-preserved-with-stubs",
     "free-official-tool-definitions-rewritten",
+    "free-json-schema-response-format-dropped",
     "free-placeholder-steering-in-chat-completions",
     "free-placeholder-steering-in-messages",
     "free-placeholder-steering-in-responses",
