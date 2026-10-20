@@ -166,21 +166,26 @@ async fn forward(
     if model.is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "缺少 model 字段".into()));
     }
-    let (upstream, wire_model) = if let Some(wire_model) = model.strip_prefix("opencode/") {
-        if !is_allowed_opencode_model(wire_model) {
-            return Err(ApiError(
-                StatusCode::BAD_REQUEST,
-                format!(
-                    "未知或非免费模型 '{model}'，OpenCode Zen 仅支持免费模型（输入/输出均为 $0.00），请对齐拉取的可用模型列表"
-                ),
-            ));
-        }
-        (opencode, wire_model)
-    } else if let Some(wire_model) = model.strip_prefix("lunaroute/") {
-        (lunaroute, wire_model)
-    } else {
-        (stepfun, model.strip_prefix("stepfun/").unwrap_or(&model))
-    };
+    let (upstream, wire_model, is_lunaroute) =
+        if let Some(wire_model) = model.strip_prefix("opencode/") {
+            if !is_allowed_opencode_model(wire_model) {
+                return Err(ApiError(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "未知或非免费模型 '{model}'，OpenCode Zen 仅支持免费模型（输入/输出均为 $0.00），请对齐拉取的可用模型列表"
+                    ),
+                ));
+            }
+            (opencode, wire_model, false)
+        } else if let Some(wire_model) = model.strip_prefix("lunaroute/") {
+            (lunaroute, wire_model, true)
+        } else {
+            (
+                stepfun,
+                model.strip_prefix("stepfun/").unwrap_or(&model),
+                false,
+            )
+        };
     let Upstream {
         mut url,
         key,
@@ -316,7 +321,7 @@ async fn forward(
         ));
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
         let mut zen_fix = zen_tools.take().map(zen::StreamFix::new);
-        let mut responses_seq: u64 = 0;
+        let mut responses_seq = is_lunaroute.then_some(0u64);
         let stream = async_stream::stream! {
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
