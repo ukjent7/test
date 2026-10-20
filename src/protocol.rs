@@ -402,21 +402,19 @@ pub(crate) fn normalize_sse(
     if keep && endpoint == "messages" {
         changes.extend(normalize_response(&mut value));
     }
-    if keep {
-        if let Some(seq) = responses_seq {
-            if let Some(existing) = value.get("sequence_number").and_then(Value::as_u64) {
-                *seq = existing + 1;
-            } else {
-                let current_seq = *seq;
-                *seq += 1;
-                value["sequence_number"] = json!(current_seq);
-                changes.push(Change::new(
-                    "/sequence_number".into(),
-                    None,
-                    Some(json!(current_seq)),
-                    "补齐 Responses 自增序号",
-                ));
-            }
+    if keep && let Some(seq) = responses_seq {
+        if let Some(existing) = value.get("sequence_number").and_then(Value::as_u64) {
+            *seq = existing + 1;
+        } else {
+            let current_seq = *seq;
+            *seq += 1;
+            value["sequence_number"] = json!(current_seq);
+            changes.push(Change::new(
+                "/sequence_number".into(),
+                None,
+                Some(json!(current_seq)),
+                "补齐 Responses 自增序号",
+            ));
         }
     }
     if !keep {
