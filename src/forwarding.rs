@@ -504,19 +504,27 @@ pub(crate) async fn models(
 ) -> Result<Json<Value>, ApiError> {
     let [stepfun, opencode, lunaroute] = gateway.upstreams("models", false)?;
     tokio::spawn(zen::sync_models_dev(opencode.client.clone()));
-    let (stepfun, opencode, lunaroute) = tokio::join!(
+    let fetch_lunaroute = !lunaroute.key.is_empty();
+    let (stepfun, opencode, lunaroute_res) = tokio::join!(
         fetch_models(stepfun, headers.clone()),
         fetch_models(opencode, headers.clone()),
-        fetch_models(lunaroute, headers),
+        async {
+            if fetch_lunaroute {
+                Some(fetch_models(lunaroute, headers).await)
+            } else {
+                None
+            }
+        },
     );
     let mut data = Vec::new();
     let mut errors = Vec::new();
     let mut successes = 0;
-    for (prefix, result) in [
-        ("stepfun", stepfun),
-        ("opencode", opencode),
-        ("lunaroute", lunaroute),
-    ] {
+    let mut upstreams: Vec<(&str, Result<Vec<Value>, (StatusCode, String)>)> =
+        vec![("stepfun", stepfun), ("opencode", opencode)];
+    if let Some(res) = lunaroute_res {
+        upstreams.push(("lunaroute", res));
+    }
+    for (prefix, result) in upstreams {
         match result {
             Ok(models) => {
                 successes += 1;

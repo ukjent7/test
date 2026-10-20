@@ -18,17 +18,27 @@ jobs:
     name: Source checks
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - uses: actions/setup-python@v7
         with:
           python-version: '3.15'
-      - run: cargo fmt --all -- --check
+      - name: Auto format with rustfmt
+        run: cargo fmt --all
+      - name: Commit and push formatted changes
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -am "style: auto format with rustfmt [skip ci]"
+            git push
+          fi
       - name: Check E2E and frontend syntax
         run: |
           python -m compileall -q tests
