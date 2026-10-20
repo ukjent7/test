@@ -67,7 +67,10 @@ impl Settings {
         for (name, value) in [
             ("GATEWAY_UPSTREAM_BASE_URL", &mut settings.upstream_base_url),
             ("GATEWAY_OPENCODE_BASE_URL", &mut settings.opencode_base_url),
-            ("GATEWAY_LUNAROUTE_BASE_URL", &mut settings.lunaroute_base_url),
+            (
+                "GATEWAY_LUNAROUTE_BASE_URL",
+                &mut settings.lunaroute_base_url,
+            ),
             ("GATEWAY_STEPFUN_API_KEY", &mut settings.stepfun_api_key),
             ("GATEWAY_OPENCODE_API_KEY", &mut settings.opencode_api_key),
             ("GATEWAY_LUNAROUTE_API_KEY", &mut settings.lunaroute_api_key),
