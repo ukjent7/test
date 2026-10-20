@@ -166,26 +166,27 @@ async fn forward(
     if model.is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "缺少 model 字段".into()));
     }
-    let (upstream, wire_model, is_lunaroute) =
-        if let Some(wire_model) = model.strip_prefix("opencode/") {
-            if !is_allowed_opencode_model(wire_model) {
-                return Err(ApiError(
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "未知或非免费模型 '{model}'，OpenCode Zen 仅支持免费模型（输入/输出均为 $0.00），请对齐拉取的可用模型列表"
-                    ),
-                ));
-            }
-            (opencode, wire_model, false)
-        } else if let Some(wire_model) = model.strip_prefix("lunaroute/") {
-            (lunaroute, wire_model, true)
-        } else {
-            (
-                stepfun,
-                model.strip_prefix("stepfun/").unwrap_or(&model),
-                false,
-            )
-        };
+    let (upstream, wire_model, is_lunaroute) = if let Some(wire_model) =
+        model.strip_prefix("opencode/")
+    {
+        if !is_allowed_opencode_model(wire_model) {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "未知或非免费模型 '{model}'，OpenCode Zen 仅支持免费模型（输入/输出均为 $0.00），请对齐拉取的可用模型列表"
+                ),
+            ));
+        }
+        (opencode, wire_model, false)
+    } else if let Some(wire_model) = model.strip_prefix("lunaroute/") {
+        (lunaroute, wire_model, true)
+    } else {
+        (
+            stepfun,
+            model.strip_prefix("stepfun/").unwrap_or(&model),
+            false,
+        )
+    };
     let Upstream {
         mut url,
         key,
