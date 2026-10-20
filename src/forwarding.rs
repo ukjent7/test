@@ -104,6 +104,25 @@ async fn forward(
                 });
                 Json(json).into_response()
             }
+        } else if endpoint == "responses" {
+            if client_streaming {
+                let sse = "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_title_skip\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"output\":[]}}\n\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_title_skip\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"output\":[]}}\n\n";
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+                    .header(header::CACHE_CONTROL, "no-cache")
+                    .body(Body::from(sse))
+                    .unwrap()
+            } else {
+                let json = json!({
+                    "id": "resp_title_skip",
+                    "object": "response",
+                    "created_at": 0,
+                    "status": "completed",
+                    "output": []
+                });
+                Json(json).into_response()
+            }
         } else if client_streaming {
             let sse = "data: {\"id\":\"chatcmpl-title-skip\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"session-title\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
             Response::builder()
@@ -137,7 +156,7 @@ async fn forward(
         return Ok(response);
     }
     let anonymous = gateway.opencode_anonymous(&headers);
-    let [stepfun, opencode] = gateway
+    let [stepfun, opencode, lunaroute] = gateway
         .upstreams(&endpoint, anonymous)
         .inspect_err(|error| {
             trace.status = error.0.as_u16();
@@ -156,6 +175,8 @@ async fn forward(
             ));
         }
         (opencode, wire_model)
+    } else if let Some(wire_model) = model.strip_prefix("lunaroute/") {
+        (lunaroute, wire_model)
     } else {
         (stepfun, model.strip_prefix("stepfun/").unwrap_or(&model))
     };
@@ -294,6 +315,7 @@ async fn forward(
         ));
         // Buffer one event only. Byte-level framing keeps split UTF-8 intact.
         let mut zen_fix = zen_tools.take().map(zen::StreamFix::new);
+        let mut responses_seq: u64 = 0;
         let stream = async_stream::stream! {
             let mut upstream = upstream.bytes_stream();
             let mut frame = Vec::new();
@@ -327,6 +349,7 @@ async fn forward(
                             &endpoint,
                             &mut trace.cache,
                             zen_fix.as_mut(),
+                            &mut responses_seq,
                         );
                         trace.repairs += changes.len();
                         trace.diff.response.extend(changes);
@@ -346,6 +369,7 @@ async fn forward(
                     &endpoint,
                     &mut trace.cache,
                     zen_fix.as_mut(),
+                    &mut responses_seq,
                 );
                 trace.repairs += changes.len();
                 trace.diff.response.extend(changes);
@@ -471,17 +495,21 @@ pub(crate) async fn models(
     State(gateway): State<Arc<Gateway>>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    let [stepfun, opencode] = gateway.upstreams("models", false)?;
+    let [stepfun, opencode, lunaroute] = gateway.upstreams("models", false)?;
     tokio::spawn(zen::sync_models_dev(opencode.client.clone()));
-    let (stepfun, opencode) = futures_util::future::join(
+    let (stepfun, opencode, lunaroute) = tokio::join!(
         fetch_models(stepfun, headers.clone()),
-        fetch_models(opencode, headers),
-    )
-    .await;
+        fetch_models(opencode, headers.clone()),
+        fetch_models(lunaroute, headers),
+    );
     let mut data = Vec::new();
     let mut errors = Vec::new();
     let mut successes = 0;
-    for (prefix, result) in [("stepfun", stepfun), ("opencode", opencode)] {
+    for (prefix, result) in [
+        ("stepfun", stepfun),
+        ("opencode", opencode),
+        ("lunaroute", lunaroute),
+    ] {
         match result {
             Ok(models) => {
                 successes += 1;

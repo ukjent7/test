@@ -185,6 +185,7 @@ summary { cursor: pointer; padding: 9px 0; color: var(--secondary); font-size: 1
 .provider-heading code { font-size: 10px; color: var(--muted); }
 .provider-mark { width: 25px; height: 25px; background: var(--accent-soft); color: var(--accent); border-radius: 7px; display: grid; place-items: center; font-weight: 600; flex: none; }
 .zen-mark { color: var(--secondary); background: var(--pill); }
+.lunaroute-mark { color: var(--accent); background: var(--pill); }
 .provider-heading .pill { padding-inline: 7px; min-height: 26px; }
 .provider-url { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-meta { display: flex; gap: 10px; color: var(--muted); font-size: 10px; }

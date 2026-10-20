@@ -83,11 +83,14 @@ async fn status(State(gateway): State<Arc<Gateway>>) -> Result<Json<Value>, ApiE
         "version": env!("CARGO_PKG_VERSION"), "enabled": control.settings.enabled,
         "upstream_base_url": control.settings.upstream_base_url,
         "opencode_base_url": control.settings.opencode_base_url,
+        "lunaroute_base_url": control.settings.lunaroute_base_url,
         "stepfun_key_configured": !control.settings.stepfun_api_key.is_empty(),
         "opencode_key_configured": !control.settings.opencode_api_key.is_empty(),
+        "lunaroute_key_configured": !control.settings.lunaroute_api_key.is_empty(),
         "proxy": control.settings.proxy,
         "stepfun_use_proxy": control.settings.stepfun_use_proxy,
         "opencode_use_proxy": control.settings.opencode_use_proxy,
+        "lunaroute_use_proxy": control.settings.lunaroute_use_proxy,
         "endpoint": format!("http://{}/v1", gateway.listen),
         "stats": control.stats, "calls": calls, "history_error": control.history_error,
     })))
@@ -133,11 +136,14 @@ fn history_error(error: rusqlite::Error) -> ApiError {
 struct UpstreamInput {
     upstream_base_url: String,
     opencode_base_url: Option<String>,
+    lunaroute_base_url: Option<String>,
     stepfun_api_key: Option<String>,
     opencode_api_key: Option<String>,
+    lunaroute_api_key: Option<String>,
     proxy: Option<String>,
     stepfun_use_proxy: Option<bool>,
     opencode_use_proxy: Option<bool>,
+    lunaroute_use_proxy: Option<bool>,
 }
 
 async fn update_settings(
@@ -158,11 +164,18 @@ async fn update_settings(
     }
     let opencode_url = messages_url(&settings.opencode_base_url)?;
     let opencode_anonymous_url = messages_url(&anonymous_base_url(&settings.opencode_base_url))?;
+    if let Some(base) = input.lunaroute_base_url {
+        settings.lunaroute_base_url = base.trim().trim_end_matches('/').to_owned();
+    }
+    let lunaroute_url = messages_url(&settings.lunaroute_base_url)?;
     if let Some(key) = input.stepfun_api_key {
         settings.stepfun_api_key = key.trim().to_owned();
     }
     if let Some(key) = input.opencode_api_key {
         settings.opencode_api_key = key.trim().to_owned();
+    }
+    if let Some(key) = input.lunaroute_api_key {
+        settings.lunaroute_api_key = key.trim().to_owned();
     }
     if let Some(proxy) = input.proxy {
         settings.proxy = proxy.trim().to_owned();
@@ -173,6 +186,9 @@ async fn update_settings(
     if let Some(enabled) = input.opencode_use_proxy {
         settings.opencode_use_proxy = enabled;
     }
+    if let Some(enabled) = input.lunaroute_use_proxy {
+        settings.lunaroute_use_proxy = enabled;
+    }
     let clients = network_clients(&settings.proxy)?;
     settings.save(&gateway.settings_path)?;
     control.settings = settings;
@@ -180,6 +196,7 @@ async fn update_settings(
     control.messages_url = url;
     control.opencode_url = opencode_url;
     control.opencode_anonymous_url = opencode_anonymous_url;
+    control.lunaroute_url = lunaroute_url;
     Ok(StatusCode::NO_CONTENT)
 }
 

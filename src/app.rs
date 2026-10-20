@@ -41,6 +41,7 @@ pub(super) struct Control {
     pub(super) messages_url: reqwest::Url,
     pub(super) opencode_url: reqwest::Url,
     pub(super) opencode_anonymous_url: reqwest::Url,
+    pub(super) lunaroute_url: reqwest::Url,
     pub(super) stats: Stats,
     pub(super) history: history::History,
     pub(super) next_id: i64,
@@ -77,7 +78,7 @@ impl Gateway {
         &self,
         endpoint: &str,
         anonymous: bool,
-    ) -> Result<[Upstream; 2], ApiError> {
+    ) -> Result<[Upstream; 3], ApiError> {
         let control = self.control.lock().unwrap();
         if !control.settings.enabled {
             return Err(ApiError(
@@ -100,6 +101,11 @@ impl Gateway {
                 opencode_url,
                 &control.settings.opencode_api_key,
                 control.settings.opencode_use_proxy,
+            ),
+            (
+                &control.lunaroute_url,
+                &control.settings.lunaroute_api_key,
+                control.settings.lunaroute_use_proxy,
             ),
         ]
         .map(|(url, key, use_proxy)| {
@@ -139,6 +145,8 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let opencode_anonymous_url = messages_url(&anonymous_base_url(&settings.opencode_base_url))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
+    let lunaroute_url = messages_url(&settings.lunaroute_base_url)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let messages_url = messages_url(&settings.upstream_base_url)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.1))?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -156,6 +164,7 @@ pub async fn prepare() -> Result<(tokio::net::TcpListener, Router), Box<dyn std:
             messages_url,
             opencode_url,
             opencode_anonymous_url,
+            lunaroute_url,
             stats: Stats::default(),
             history,
             next_id,

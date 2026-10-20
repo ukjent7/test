@@ -14,16 +14,22 @@ pub struct Settings {
     pub upstream_base_url: String,
     #[serde(default = "opencode_base_url")]
     pub opencode_base_url: String,
+    #[serde(default = "lunaroute_base_url")]
+    pub lunaroute_base_url: String,
     #[serde(default)]
     pub stepfun_api_key: String,
     #[serde(default)]
     pub opencode_api_key: String,
+    #[serde(default)]
+    pub lunaroute_api_key: String,
     #[serde(default)]
     pub proxy: String,
     #[serde(default = "use_proxy")]
     pub stepfun_use_proxy: bool,
     #[serde(default = "use_proxy")]
     pub opencode_use_proxy: bool,
+    #[serde(default = "use_proxy")]
+    pub lunaroute_use_proxy: bool,
     pub enabled: bool,
 }
 
@@ -35,6 +41,10 @@ fn opencode_base_url() -> String {
     "https://opencode.ai/zen/v1".into()
 }
 
+fn lunaroute_base_url() -> String {
+    "https://gw.lunaroute.com/v1".into()
+}
+
 impl Settings {
     pub(crate) fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let mut settings = match fs::read(path) {
@@ -42,11 +52,14 @@ impl Settings {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Settings {
                 upstream_base_url: "https://api.stepfun.ai/step_plan/v1".into(),
                 opencode_base_url: opencode_base_url(),
+                lunaroute_base_url: lunaroute_base_url(),
                 proxy: String::new(),
                 stepfun_use_proxy: true,
                 opencode_use_proxy: true,
+                lunaroute_use_proxy: true,
                 stepfun_api_key: String::new(),
                 opencode_api_key: String::new(),
+                lunaroute_api_key: String::new(),
                 enabled: true,
             },
             Err(error) => return Err(error.into()),
@@ -54,8 +67,10 @@ impl Settings {
         for (name, value) in [
             ("GATEWAY_UPSTREAM_BASE_URL", &mut settings.upstream_base_url),
             ("GATEWAY_OPENCODE_BASE_URL", &mut settings.opencode_base_url),
+            ("GATEWAY_LUNAROUTE_BASE_URL", &mut settings.lunaroute_base_url),
             ("GATEWAY_STEPFUN_API_KEY", &mut settings.stepfun_api_key),
             ("GATEWAY_OPENCODE_API_KEY", &mut settings.opencode_api_key),
+            ("GATEWAY_LUNAROUTE_API_KEY", &mut settings.lunaroute_api_key),
         ] {
             if let Ok(overridden) = env::var(name) {
                 *value = overridden;

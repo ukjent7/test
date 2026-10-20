@@ -36,7 +36,11 @@ export function createGateway({getStatus, refresh}) {
     const model = selectedModel || 'stepfun/step-5-preview';
     const select = byId('client-protocol');
     if (!protocolChosen) {
-      const derived = model.startsWith('opencode/') ? 'chat_completions' : 'messages';
+      const derived = model.startsWith('lunaroute/')
+        ? 'responses'
+        : model.startsWith('opencode/')
+        ? 'chat_completions'
+        : 'messages';
       // 用户正操作下拉框时不抢值。
       if (document.activeElement !== select && select.value !== derived) select.value = derived;
     }
@@ -185,21 +189,25 @@ export function createGateway({getStatus, refresh}) {
       byId('copy-endpoint').disabled = !status;
       byId('copy-config').disabled = !status;
       byId('enabled').disabled = !online || toggling;
-      for (const id of ['edit-upstream', 'edit-opencode', 'edit-proxy']) byId(id).disabled = !online;
+      for (const id of ['edit-upstream', 'edit-opencode', 'edit-lunaroute', 'edit-proxy']) byId(id).disabled = !online;
       byId('fetch-models').disabled = !online || !!modelRequest;
       if (!status) return;
       byId('enabled').setAttribute('aria-checked', String(status.enabled));
       paint('endpoint', status.endpoint);
-      for (const [id, value] of [['upstream', status.upstream_base_url], ['opencode-upstream', status.opencode_base_url]]) {
+      for (const [id, value] of [
+        ['upstream', status.upstream_base_url],
+        ['opencode-upstream', status.opencode_base_url],
+        ['lunaroute-upstream', status.lunaroute_base_url],
+      ]) {
         paint(id, value);
         byId(id).title = value;
       }
-      for (const provider of ['stepfun', 'opencode']) {
+      for (const provider of ['stepfun', 'opencode', 'lunaroute']) {
         paint(`${provider}-key-state`, status[`${provider}_key_configured`] ? '密钥已设置' : '使用客户端密钥');
         paint(`${provider}-proxy-state`, status[`${provider}_use_proxy`] ? '跟随代理设置' : '直连');
       }
       const proxy = status.proxy === 'direct' ? '直连' : status.proxy ? '自定义代理' : '系统代理';
-      paint('proxy-status', `${proxy} · StepFun ${status.stepfun_use_proxy ? '跟随设置' : '直连'} · Zen ${status.opencode_use_proxy ? '跟随设置' : '直连'}`);
+      paint('proxy-status', `${proxy} · StepFun ${status.stepfun_use_proxy ? '跟随设置' : '直连'} · Zen ${status.opencode_use_proxy ? '跟随设置' : '直连'} · LunaRoute ${status.lunaroute_use_proxy ? '跟随设置' : '直连'}`);
       byId('proxy-status').title = byId('proxy-status').textContent;
       for (const field of ['requests', 'active', 'repairs', 'errors']) paint(field, status.stats[field].toLocaleString('zh-CN'));
       connectionConfig();

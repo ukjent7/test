@@ -128,8 +128,11 @@ fn save_usage(connection: &Connection, id: Option<i64>) -> rusqlite::Result<()> 
     connection.execute(
         "INSERT OR IGNORE INTO usage
          SELECT id, json_extract(summary, '$.timestamp'),
-         CASE WHEN substr(json_extract(summary, '$.model'), 1, 9) = 'opencode/' THEN 'opencode' ELSE 'stepfun' END,
+         CASE WHEN substr(json_extract(summary, '$.model'), 1, 9) = 'opencode/' THEN 'opencode'
+              WHEN substr(json_extract(summary, '$.model'), 1, 11) = 'lunaroute/' THEN 'lunaroute'
+              ELSE 'stepfun' END,
          CASE WHEN substr(json_extract(summary, '$.model'), 1, 9) = 'opencode/' THEN substr(json_extract(summary, '$.model'), 10)
+              WHEN substr(json_extract(summary, '$.model'), 1, 11) = 'lunaroute/' THEN substr(json_extract(summary, '$.model'), 12)
               WHEN substr(json_extract(summary, '$.model'), 1, 8) = 'stepfun/' THEN substr(json_extract(summary, '$.model'), 9)
               ELSE json_extract(summary, '$.model') END,
          json_extract(summary, '$.cache.input_tokens'), json_extract(summary, '$.cache.output_tokens'),

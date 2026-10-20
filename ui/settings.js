@@ -18,12 +18,13 @@ export function createSettings({getStatus, refresh, onSaved}) {
     if (!status || saving) return;
     scope = kind;
     opener = byId(trigger);
-    for (const name of ['stepfun', 'opencode', 'network']) {
+    for (const name of ['stepfun', 'opencode', 'lunaroute', 'network']) {
       byId(`${name}-fields`).hidden = name !== scope;
     }
     byId('upstream-input').required = scope === 'stepfun';
     byId('opencode-input').required = scope === 'opencode';
-    byId('settings-title').textContent = {stepfun: 'StepFun', opencode: 'OpenCode Zen', network: '网络代理'}[scope];
+    byId('lunaroute-input').required = scope === 'lunaroute';
+    byId('settings-title').textContent = {stepfun: 'StepFun', opencode: 'OpenCode Zen', lunaroute: 'LunaRoute', network: '网络代理'}[scope];
     byId('settings-hint').textContent = scope === 'network'
       ? '系统模式读取系统代理或 HTTP_PROXY / HTTPS_PROXY 等环境设置。'
       : `${scope === 'opencode' ? 'Zen 匿名访问可填 public；' : ''}配置上游密钥后，客户端无需提供密钥。`;
@@ -33,11 +34,17 @@ export function createSettings({getStatus, refresh, onSaved}) {
     form.reset();
     byId('upstream-input').value = status.upstream_base_url;
     byId('opencode-input').value = status.opencode_base_url;
+    byId('lunaroute-input').value = status.lunaroute_base_url;
     byId('proxy-mode').value = status.proxy === 'direct' ? 'direct' : status.proxy ? 'custom' : 'system';
     byId('proxy-address').value = ['', 'direct'].includes(status.proxy) ? '' : status.proxy;
     byId('stepfun-use-proxy').checked = status.stepfun_use_proxy;
     byId('opencode-use-proxy').checked = status.opencode_use_proxy;
-    for (const [id, configured] of [['stepfun-key', status.stepfun_key_configured], ['opencode-key', status.opencode_key_configured]]) {
+    byId('lunaroute-use-proxy').checked = status.lunaroute_use_proxy;
+    for (const [id, configured] of [
+      ['stepfun-key', status.stepfun_key_configured],
+      ['opencode-key', status.opencode_key_configured],
+      ['lunaroute-key', status.lunaroute_key_configured],
+    ]) {
       byId(id).placeholder = configured ? '已设置，留空保留' : '未设置';
     }
     proxyModeChanged();
@@ -48,6 +55,7 @@ export function createSettings({getStatus, refresh, onSaved}) {
 
   byId('edit-upstream').addEventListener('click', () => open('stepfun', 'upstream-input', 'edit-upstream'));
   byId('edit-opencode').addEventListener('click', () => open('opencode', 'opencode-input', 'edit-opencode'));
+  byId('edit-lunaroute').addEventListener('click', () => open('lunaroute', 'lunaroute-input', 'edit-lunaroute'));
   byId('edit-proxy').addEventListener('click', () => open('network', 'proxy-mode', 'edit-proxy'));
   byId('proxy-mode').addEventListener('change', proxyModeChanged);
   for (const id of ['close-settings', 'cancel-settings']) {
@@ -58,6 +66,7 @@ export function createSettings({getStatus, refresh, onSaved}) {
     form.reset();
     byId('stepfun-key').value = '';
     byId('opencode-key').value = '';
+    byId('lunaroute-key').value = '';
     showError('settings-error');
     opener?.focus();
   });
@@ -69,9 +78,10 @@ export function createSettings({getStatus, refresh, onSaved}) {
     };
     if (scope === 'network') {
       settings.proxy = byId('proxy-mode').value === 'system' ? '' : byId('proxy-mode').value === 'direct' ? 'direct' : byId('proxy-address').value.trim();
-      for (const provider of ['stepfun', 'opencode']) settings[`${provider}_use_proxy`] = byId(`${provider}-use-proxy`).checked;
+      for (const provider of ['stepfun', 'opencode', 'lunaroute']) settings[`${provider}_use_proxy`] = byId(`${provider}-use-proxy`).checked;
     } else {
       if (scope === 'opencode') settings.opencode_base_url = byId('opencode-input').value.trim();
+      if (scope === 'lunaroute') settings.lunaroute_base_url = byId('lunaroute-input').value.trim();
       if (byId(`${scope}-key`).value.trim()) settings[`${scope}_api_key`] = byId(`${scope}-key`).value.trim();
     }
     saving = true;

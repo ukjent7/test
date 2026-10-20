@@ -358,13 +358,16 @@ pub(crate) fn normalize_sse(
     endpoint: &str,
     usage: &mut cache::Usage,
     zen: Option<&mut zen::StreamFix>,
+    responses_seq: &mut u64,
 ) -> (Vec<u8>, Vec<Change>) {
+    let is_responses = endpoint == "responses";
     let has_tool_calls = frame.windows(12).any(|w| w == b"\"tool_calls\"");
     let has_usage = frame.windows(7).any(|w| w == b"\"usage\"");
     let has_reasoning = frame.windows(10).any(|w| w == b"\"reasoning");
     let has_markup = frame.windows(11).any(|w| w == b"<tool_call>");
     let markup_pending = zen.as_ref().is_some_and(|z| z.has_pending_markup());
     if endpoint != "messages"
+        && !is_responses
         && !has_tool_calls
         && !has_usage
         && !has_reasoning
@@ -398,6 +401,27 @@ pub(crate) fn normalize_sse(
     }
     if keep && endpoint == "messages" {
         changes.extend(normalize_response(&mut value));
+    }
+    if keep
+        && (is_responses
+            || value
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t.starts_with("response.")))
+    {
+        if let Some(existing) = value.get("sequence_number").and_then(Value::as_u64) {
+            *responses_seq = existing + 1;
+        } else {
+            let current_seq = *responses_seq;
+            *responses_seq += 1;
+            value["sequence_number"] = json!(current_seq);
+            changes.push(Change::new(
+                "/sequence_number".into(),
+                None,
+                Some(json!(current_seq)),
+                "补齐 Responses 自增序号",
+            ));
+        }
     }
     if !keep {
         label_changes(&mut changes, frame_number, &value);

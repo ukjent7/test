@@ -1,6 +1,6 @@
 export const byId = id => document.getElementById(id);
 export const count = value => value == null ? '未报告' : value.toLocaleString('zh-CN');
-export const providerName = provider => ({stepfun: 'StepFun', opencode: 'OpenCode Zen'}[provider] || provider);
+export const providerName = provider => ({stepfun: 'StepFun', opencode: 'OpenCode Zen', lunaroute: 'LunaRoute'}[provider] || provider);
 
 // 旁路请求种类 → 界面文案;未知种类显示客户端原始标签。
 export const laneName = lane => ({'memory-capture': '记忆采集', dream: '记忆整理', 'dream-v2': '记忆整理 v2',
