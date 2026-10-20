@@ -519,8 +519,7 @@ pub(crate) async fn models(
     let mut data = Vec::new();
     let mut errors = Vec::new();
     let mut successes = 0;
-    let mut upstreams: Vec<(&str, Result<Vec<Value>, (StatusCode, String)>)> =
-        vec![("stepfun", stepfun), ("opencode", opencode)];
+    let mut upstreams = vec![("stepfun", stepfun), ("opencode", opencode)];
     if let Some(res) = lunaroute_res {
         upstreams.push(("lunaroute", res));
     }
